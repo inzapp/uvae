@@ -57,7 +57,7 @@ class Model:
         self.conv2d(m, 64,  3, 2, 'relu')
         self.conv2d(m, 128, 3, 2, 'relu')
         self.conv2d(m, 256, 3, 2, 'relu')
-        self.gap(m)
+        self.flatten(m)
         self.dense(m, self.latent_dim, 'tanh')
         return m
 
@@ -111,6 +111,9 @@ class Model:
 
     def reshape(self, m, target_shape):
         m.add(tf.keras.layers.Reshape(target_shape=target_shape))
+
+    def flatten(self, m):
+        m.add(tf.keras.layers.Flatten())
 
     def gap(self, m):
         m.add(tf.keras.layers.GlobalAveragePooling2D())
