@@ -94,40 +94,58 @@ class Model:
     def build_discriminator(self):
         discriminator_input = tf.keras.layers.Input(shape=self.input_shape)
         x = discriminator_input
-        x = self.conv2d(x, 16, 3, 2, 'relu')
-        x = self.conv2d(x, 32, 3, 2, 'relu')
-        x = self.conv2d(x, 64, 3, 2, 'relu')
-        x = self.conv2d(x, 128, 3, 2, 'relu')
-        x = self.conv2d(x, 256, 3, 2, 'relu')
+        x = self.conv2d(x, 16, 3, 2, 'leaky')
+        x = self.conv2d(x, 32, 3, 2, 'leaky')
+        x = self.conv2d(x, 64, 3, 2, 'leaky')
+        x = self.conv2d(x, 128, 3, 2, 'leaky')
+        x = self.conv2d(x, 256, 3, 2, 'leaky')
         x = self.conv2d(x, 1, 1, 1, 'sigmoid')
         discriminator_output = self.gap(x)
         return discriminator_input, discriminator_output
 
     def conv2d(self, x, filters, kernel_size, strides=1, activation='relu', input_shape=()):
-        return tf.keras.layers.Conv2D(
+        x = tf.keras.layers.Conv2D(
             strides=strides,
             filters=filters,
             padding='same',
+            use_bias=False,
             kernel_size=kernel_size,
             kernel_initializer='he_normal',
-            activation=activation,
             input_shape=input_shape)(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        if activation == 'leaky':
+            x = tf.keras.layers.LeakyReLU(alpha=0.2)(x)
+        else:
+            x = tf.keras.layers.Activation(activation=activation)(x)
+        return x
 
     def conv2d_transpose(self, x, filters, kernel_size, strides=1, activation='relu', input_shape=()):
-        return tf.keras.layers.Conv2DTranspose(
+        x = tf.keras.layers.Conv2DTranspose(
             strides=strides,
             filters=filters,
             padding='same',
+            use_bias=False,
             kernel_size=kernel_size,
             kernel_initializer='he_normal',
-            activation=activation,
             input_shape=input_shape)(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        if activation == 'leaky':
+            x = tf.keras.layers.LeakyReLU(alpha=0.2)(x)
+        else:
+            x = tf.keras.layers.Activation(activation=activation)(x)
+        return x
 
     def dense(self, x, units, activation='relu', input_shape=()):
-        return tf.keras.layers.Dense(
+        x = tf.keras.layers.Dense(
             units=units,
-            kernel_initializer='he_normal',
-            activation=activation)(x)
+            use_bias=False,
+            kernel_initializer='he_normal')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        if activation == 'leaky':
+            x = tf.keras.layers.LeakyReLU(alpha=0.2)(x)
+        else:
+            x = tf.keras.layers.Activation(activation=activation)(x)
+        return x
 
     def sampling(self, z_mean, z_log_var):
         return tf.keras.layers.Lambda(function=self.sampling_function)([z_mean, z_log_var])

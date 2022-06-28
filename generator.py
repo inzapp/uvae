@@ -57,8 +57,9 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         vae_x = np.asarray(vae_x).reshape((self.batch_size,) + self.input_shape).astype('float32')
         # vae_x = (vae_x - 127.5) / 127.5
         vae_x /= 255.0
-        dx = vae_x[:self.half_batch_size]
-        dx = np.append(dx, np.asarray(self.graph_forward(self.vae, vae_x[self.half_batch_size:])).reshape((self.half_batch_size,) + self.input_shape), axis=0).astype('float32')
+        dx_real = vae_x[:self.half_batch_size]
+        dx_fake = np.asarray(self.graph_forward(self.vae, vae_x[:self.half_batch_size])).reshape((self.half_batch_size,) + self.input_shape).astype('float32')
+        dx = np.append(dx_real, dx_fake, axis=0)
         dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
         gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
         # # ey = np.asarray([np.random.uniform(-1.0, 1.0, self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.batch_size)]).astype('float32')

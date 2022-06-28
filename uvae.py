@@ -103,6 +103,7 @@ class UniformVectorizedAutoEncoder:
             z_mean, z_log_var, z = model(x, training=True)
             loss = -0.5 * (1.0 + z_log_var - K.square(z_mean) - K.exp(z_log_var))
             loss = tf.reduce_mean(tf.reduce_sum(loss, axis=1), axis=0)
+            # loss = tf.reduce_mean(loss, axis=0)
             mean_loss = tf.reduce_mean(loss)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -112,10 +113,20 @@ class UniformVectorizedAutoEncoder:
     def train_step_vae(self, model, optimizer, x):
         with tf.GradientTape() as tape:
             y_pred = model(x, training=True)
-            r_loss_factor = 1.0
-            # loss = tf.reduce_mean(K.square(x - y_pred), axis=0) * r_loss_factor
-            loss = tf.reduce_mean(K.binary_crossentropy(x, y_pred), axis=0)
+            r_loss_factor = 1000.0
+            loss = tf.reduce_mean(K.square(x - y_pred), axis=0) * r_loss_factor
+            # loss = tf.reduce_mean(K.binary_crossentropy(x, y_pred), axis=0)
             mean_loss = tf.reduce_mean(K.square(x - y_pred))
+        gradients = tape.gradient(loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+        return mean_loss
+
+    @tf.function
+    def train_step_discriminator(self, model, optimizer, x, y_true):
+        with tf.GradientTape() as tape:
+            y_pred = model(x, training=True)
+            loss = tf.reduce_mean(K.binary_crossentropy(y_true, y_pred), axis=0)
+            mean_loss = tf.reduce_mean(loss)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return mean_loss
@@ -139,20 +150,39 @@ class UniformVectorizedAutoEncoder:
 
     def train(self):
         iteration_count = 0
-        optimizer_e = tf.keras.optimizers.Adam(lr=self.lr)
+
+        optimizer_e =   tf.keras.optimizers.Adam(lr=self.lr)
+        optimizer_d =   tf.keras.optimizers.Adam(lr=self.lr)
         optimizer_vae = tf.keras.optimizers.Adam(lr=self.lr)
         optimizer_gan = tf.keras.optimizers.Adam(lr=self.lr)
+
+        # optimizer_e =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
+        # optimizer_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
+        # optimizer_vae = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
+        # optimizer_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
+
+        # optimizer_e =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        # optimizer_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        # optimizer_vae = tf.keras.optimizers.RMSprop(lr=self.lr)
+        # optimizer_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
         os.makedirs(self.checkpoint_path, exist_ok=True)
         while True:
             for vae_x, dx, dy, gan_y in self.train_data_generator:
                 iteration_count += 1
-                # self.discriminator.trainable = True
+
+                kl_loss = 0.0
                 kl_loss = self.train_step_encoder(self.encoder, optimizer_e, vae_x)
+
                 reconstruction_loss = self.train_step_vae(self.vae, optimizer_vae, vae_x)
-                #self.discriminator.trainable = False
-                #adversarial_loss = self.train_step_gan(self.gan, optimizer_gan, vae_x, gan_y)
+
+                # self.discriminator.trainable = True
+                discriminator_loss = 0.0
+                # discriminator_loss = self.train_step_discriminator(self.discriminator, optimizer_d, dx, dy)
+
+                # self.discriminator.trainable = False
                 adversarial_loss = 0.0
-                print(f'\r[iteration count : {iteration_count:6d}] kl_loss => {kl_loss:.4f}, reconstruction_loss => {reconstruction_loss:.4f}, adversarial_loss => {adversarial_loss:.4f}', end='\t')
+                # adversarial_loss = self.train_step_gan(self.gan, optimizer_gan, vae_x, gan_y)
+                print(f'\r[iteration count : {iteration_count:6d}] kl_loss => {kl_loss:.4f}, reconstruction_loss => {reconstruction_loss:.4f}, discriminator_loss : {discriminator_loss:.4f}, adversarial_loss => {adversarial_loss:.4f}', end='\t')
                 if self.training_view:
                     self.training_view_function()
                 if iteration_count % 5000 == 0:
