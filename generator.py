@@ -44,20 +44,19 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         fs = []
         for _ in range(self.batch_size):
             fs.append(self.pool.submit(self.load_image, self.next_image_path()))
-        ae_x = []
+        ex = []
         for f in fs:
             img = f.result()
             img = cv2.resize(img, (self.input_shape[1], self.input_shape[0]))
             x = np.asarray(img).reshape(self.input_shape)
-            ae_x.append(x)
-        ae_x = np.asarray(ae_x).reshape((self.batch_size,) + self.input_shape).astype('float32')
-        ae_x = (ae_x - 127.5) / 127.5
-        dx = [self.get_z_vector(size=self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.half_batch_size)]
-        dx = np.append(np.asarray(dx), np.asarray(self.graph_forward(self.encoder, ae_x[:self.half_batch_size])).reshape((self.half_batch_size, self.latent_dim)), axis=0).astype('float32')
+            ex.append(x)
+        ex = np.asarray(ex).reshape((self.batch_size,) + self.input_shape).astype('float32')
+        ex = (ex - 127.5) / 127.5
+        dx = np.asarray([self.get_z_vector(size=self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.half_batch_size)])
+        dx = np.append(dx, np.asarray(self.graph_forward(self.encoder, ex[:self.half_batch_size])).reshape((self.half_batch_size, self.latent_dim)), axis=0).astype('float32')
         dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
-        gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
-        ey = np.asarray([self.get_z_vector(size=self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.batch_size)]).astype('float32')
-        return ae_x, dx, dy, gan_y, ey
+        gan_z_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
+        return ex, dx, dy, gan_z_y
 
     @tf.function
     def graph_forward(self, model, x):
