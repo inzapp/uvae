@@ -20,6 +20,7 @@ limitations under the License.
 import os
 import numpy as np
 import tensorflow as tf
+import tensorflow.keras.backend as K
 
 
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
@@ -30,7 +31,6 @@ class Model:
         self.input_shape = input_shape
         self.encoder = None
         self.decoder = None
-        self.ae = None
         self.discriminator = None
         self.gan = None
         self.latent_dim = latent_dim
@@ -38,88 +38,116 @@ class Model:
     def build(self):
         assert self.input_shape[0] % 32 == 0
         assert self.input_shape[1] % 32 == 0
-        self.encoder = self.build_encoder()
-        self.decoder = self.build_decoder()
-        self.discriminator = self.build_discriminator()
-        self.ae = tf.keras.models.Sequential([self.encoder, self.decoder])
-        self.gan = tf.keras.models.Sequential([self.encoder, self.discriminator])
-        return self.ae, self.gan, self.encoder, self.decoder, self.discriminator
+        encoder_input, z_mean, z_log_var, z = self.build_encoder()
+        decoder_input, decoder_output = self.build_decoder()
+        discriminator_input, discriminator_output = self.build_discriminator()
+        self.encoder = tf.keras.models.Model(encoder_input, [z_mean, z_log_var, z])
+        self.decoder = tf.keras.models.Model(decoder_input, decoder_output)
+        self.discriminator = tf.keras.models.Model(discriminator_input, discriminator_output)
+        vae_output = self.decoder(z)
+        self.vae = tf.keras.models.Model(encoder_input, vae_output)
+        self.gan = tf.keras.models.Model(encoder_input, self.discriminator(vae_output))
+
+        # self.encoder.save('checkpoints/encoder.h5', include_optimizer=False)
+        # self.decoder.save('checkpoints/decoder.h5', include_optimizer=False)
+        # self.discriminator.save('checkpoints/discriminator.h5', include_optimizer=False)
+        # self.vae.save('checkpoints/vae.h5', include_optimizer=False)
+        # self.gan.save('checkpoints/gan.h5', include_optimizer=False)
+        # exit(0)
+        return self.vae, self.gan, self.encoder, self.decoder, self.discriminator
 
     # def load(self, model_path):
-    #     self.ae = tf.keras.models.load_model(model_path, compile=False)
-    #     self.input_shape = self.ae.input_shape[1:]
-    #     return self.ae, self.input_shape
+    #     self.vae = tf.keras.models.load_model(model_path, compile=False)
+    #     self.input_shape = self.vae.input_shape[1:]
+    #     return self.vae, self.input_shape
 
     def build_encoder(self):
-        m = tf.keras.models.Sequential()
-        self.conv2d(m, 16,  3, 2, 'relu', input_shape=self.input_shape)
-        self.conv2d(m, 32,  3, 2, 'relu')
-        self.conv2d(m, 64,  3, 2, 'relu')
-        self.conv2d(m, 128, 3, 2, 'relu')
-        self.conv2d(m, 256, 3, 2, 'relu')
-        self.flatten(m)
-        self.dense(m, self.latent_dim, 'tanh')
-        return m
+        encoder_input = tf.keras.layers.Input(shape=self.input_shape)
+        x = encoder_input
+        x = self.conv2d(x, 16, 3, 2, 'relu')
+        x = self.conv2d(x, 32, 3, 2, 'relu')
+        x = self.conv2d(x, 64, 3, 2, 'relu')
+        x = self.conv2d(x, 128, 3, 2, 'relu')
+        x = self.conv2d(x, 256, 3, 2, 'relu')
+        x = self.flatten(x)
+        z_mean = self.dense(x, self.latent_dim, 'linear')
+        z_log_var = self.dense(x, self.latent_dim, 'linear')
+        z = self.sampling(z_mean, z_log_var)
+        return encoder_input, z_mean, z_log_var, z
 
     def build_decoder(self):
-        m = tf.keras.models.Sequential()
         target_rows = self.input_shape[0] // 32
         target_cols = self.input_shape[1] // 32
         target_channels = 256
-        self.dense(m, target_rows * target_cols * target_channels, input_shape=(self.latent_dim,))
-        self.reshape(m, (target_rows, target_cols, target_channels))
-        self.conv2d_transpose(m, 256, 3, 2, 'relu')
-        self.conv2d_transpose(m, 128, 3, 2, 'relu')
-        self.conv2d_transpose(m, 64,  3, 2, 'relu')
-        self.conv2d_transpose(m, 32,  3, 2, 'relu')
-        self.conv2d_transpose(m, 16,  3, 2, 'relu')
-        self.conv2d_transpose(m, self.input_shape[-1], 1, 1, 'tanh')
-        return m
+        decoder_input = tf.keras.layers.Input(shape=(self.latent_dim,))
+        x = decoder_input
+        x = self.dense(x, target_rows * target_cols * target_channels, input_shape=(self.latent_dim,))
+        x = self.reshape(x, (target_rows, target_cols, target_channels))
+        x = self.conv2d_transpose(x, 256, 3, 2, 'relu')
+        x = self.conv2d_transpose(x, 128, 3, 2, 'relu')
+        x = self.conv2d_transpose(x, 64,  3, 2, 'relu')
+        x = self.conv2d_transpose(x, 32,  3, 2, 'relu')
+        x = self.conv2d_transpose(x, 16,  3, 2, 'relu')
+        decoder_output = self.conv2d_transpose(x, self.input_shape[-1], 1, 1, 'sigmoid')
+        return decoder_input, decoder_output
 
     def build_discriminator(self):
-        m = tf.keras.models.Sequential()
-        self.dense(m, 256, 'relu', input_shape=(self.latent_dim,))
-        self.dense(m, 256, 'relu')
-        self.dense(m, 1, 'linear')
-        return m
+        discriminator_input = tf.keras.layers.Input(shape=self.input_shape)
+        x = discriminator_input
+        x = self.conv2d(x, 16, 3, 2, 'relu')
+        x = self.conv2d(x, 32, 3, 2, 'relu')
+        x = self.conv2d(x, 64, 3, 2, 'relu')
+        x = self.conv2d(x, 128, 3, 2, 'relu')
+        x = self.conv2d(x, 256, 3, 2, 'relu')
+        x = self.conv2d(x, 1, 1, 1, 'sigmoid')
+        discriminator_output = self.gap(x)
+        return discriminator_input, discriminator_output
 
-    def conv2d(self, m, filters, kernel_size, strides=1, activation='relu', input_shape=()):
-        m.add(tf.keras.layers.Conv2D(
+    def conv2d(self, x, filters, kernel_size, strides=1, activation='relu', input_shape=()):
+        return tf.keras.layers.Conv2D(
             strides=strides,
             filters=filters,
             padding='same',
             kernel_size=kernel_size,
             kernel_initializer='he_normal',
             activation=activation,
-            input_shape=input_shape))
+            input_shape=input_shape)(x)
 
-    def conv2d_transpose(self, m, filters, kernel_size, strides=1, activation='relu', input_shape=()):
-        m.add(tf.keras.layers.Conv2DTranspose(
+    def conv2d_transpose(self, x, filters, kernel_size, strides=1, activation='relu', input_shape=()):
+        return tf.keras.layers.Conv2DTranspose(
             strides=strides,
             filters=filters,
             padding='same',
             kernel_size=kernel_size,
             kernel_initializer='he_normal',
             activation=activation,
-            input_shape=input_shape))
+            input_shape=input_shape)(x)
 
-    def dense(self, m, units, activation='relu', input_shape=()):
-        m.add(tf.keras.layers.Dense(
+    def dense(self, x, units, activation='relu', input_shape=()):
+        return tf.keras.layers.Dense(
             units=units,
             kernel_initializer='he_normal',
-            activation=activation))
+            activation=activation)(x)
 
-    def reshape(self, m, target_shape):
-        m.add(tf.keras.layers.Reshape(target_shape=target_shape))
+    def sampling(self, z_mean, z_log_var):
+        return tf.keras.layers.Lambda(function=self.sampling_function)([z_mean, z_log_var])
 
-    def flatten(self, m):
-        m.add(tf.keras.layers.Flatten())
+    def sampling_function(self, args):
+        z_mean, log_var = args
+        epsilon = K.random_normal(shape=K.shape(z_mean), mean=0.0, stddev=1.0)
+        return z_mean + K.exp(log_var * 0.5) * epsilon
 
-    def gap(self, m):
-        m.add(tf.keras.layers.GlobalAveragePooling2D())
+    def reshape(self, x, target_shape):
+        return tf.keras.layers.Reshape(target_shape=target_shape)(x)
+
+    def flatten(self, x):
+        return tf.keras.layers.Flatten()(x)
+
+    def gap(self, x):
+        return tf.keras.layers.GlobalAveragePooling2D()(x)
 
     # def save(self, path, iteration_count, loss):
-    #     self.ae.save(f'{path}/ae_{iteration_count}_iter_{loss:.4f}_loss.h5', include_optimizer=False)
+    #     self.vae.save(f'{path}/ae_{iteration_count}_iter_{loss:.4f}_loss.h5', include_optimizer=False)
 
     def summary(self):
         self.encoder.summary()

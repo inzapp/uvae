@@ -26,12 +26,12 @@ from concurrent.futures.thread import ThreadPoolExecutor
 
 class UVAEDataGenerator(tf.keras.utils.Sequence):
     def __init__(self,
-                 encoder,
+                 vae,
                  image_paths,
                  input_shape,
                  batch_size,
                  latent_dim):
-        self.encoder = encoder
+        self.vae = vae
         self.image_paths = image_paths
         self.input_shape = input_shape
         self.batch_size = batch_size
@@ -48,20 +48,31 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         fs = []
         for _ in range(self.batch_size):
             fs.append(self.pool.submit(self.load_image, self.next_image_path()))
-        ae_x = []
+        vae_x = []
         for f in fs:
             img = f.result()
             img = cv2.resize(img, (self.input_shape[1], self.input_shape[0]))
             x = np.asarray(img).reshape(self.input_shape)
-            ae_x.append(x)
-        ae_x = np.asarray(ae_x).reshape((self.batch_size,) + self.input_shape).astype('float32')
-        ae_x = (ae_x - 127.5) / 127.5
-        dx = [np.random.uniform(-1.0, 1.0, self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.half_batch_size)]
-        dx = np.append(np.asarray(dx), np.asarray(self.graph_forward(self.encoder, ae_x[:self.half_batch_size])).reshape((self.half_batch_size, self.latent_dim)), axis=0).astype('float32')
+            vae_x.append(x)
+        vae_x = np.asarray(vae_x).reshape((self.batch_size,) + self.input_shape).astype('float32')
+        # vae_x = (vae_x - 127.5) / 127.5
+        vae_x /= 255.0
+        dx = vae_x[:self.half_batch_size]
+        dx = np.append(dx, np.asarray(self.graph_forward(self.vae, vae_x[self.half_batch_size:])).reshape((self.half_batch_size,) + self.input_shape), axis=0).astype('float32')
         dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
         gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
-        ey = np.asarray([np.random.uniform(-1.0, 1.0, self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.batch_size)]).astype('float32')
-        return ae_x, dx, dy, gan_y, ey
+        # # ey = np.asarray([np.random.uniform(-1.0, 1.0, self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.batch_size)]).astype('float32')
+        # ey = np.asarray([self.get_z_vector().reshape((self.latent_dim,)) for _ in range(self.batch_size)]).astype('float32')
+        # return vae_x, dx, dy, gan_y, ey
+        return vae_x, dx, dy, gan_y
+
+    def get_z_vector(self):
+        z = np.random.normal(0.0, 1.0, self.latent_dim)
+        min_val = np.min(z)
+        z -= min_val
+        max_val = np.max(z)
+        z /= max_val
+        return z
 
     def next_image_path(self):
         path = self.image_paths[self.img_index]

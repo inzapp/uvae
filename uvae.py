@@ -57,10 +57,10 @@ class UniformVectorizedAutoEncoder:
         self.model = Model(input_shape=input_shape, latent_dim=self.latent_dim)
         # if os.path.exists(pretrained_model_path) and os.path.isfile(pretrained_model_path):
         #     print(f'\npretrained model path : {[pretrained_model_path]}')
-        #     self.ae, self.input_shape = self.model.load(pretrained_model_path)
+        #     self.vae, self.input_shape = self.model.load(pretrained_model_path)
         #     print(f'input_shape : {self.input_shape}')
         # else:
-        self.ae, self.gan, self.encoder, self.decoder, self.discriminator = self.model.build()
+        self.vae, self.gan, self.encoder, self.decoder, self.discriminator = self.model.build()
 
         if validation_image_path != '':
             self.train_image_paths, _ = self.init_image_paths(train_image_path)
@@ -68,19 +68,19 @@ class UniformVectorizedAutoEncoder:
         elif validation_split > 0.0:
             self.train_image_paths, self.validation_image_paths = self.init_image_paths(train_image_path, validation_split=validation_split)
         self.train_data_generator = UVAEDataGenerator(
-            encoder=self.encoder,
+            vae=self.vae,
             image_paths=self.train_image_paths,
             input_shape=input_shape,
             batch_size=batch_size,
             latent_dim=self.latent_dim)
         self.validation_data_generator = UVAEDataGenerator(
-            encoder=self.encoder,
+            vae=self.vae,
             image_paths=self.validation_image_paths,
             input_shape=input_shape,
             batch_size=batch_size,
             latent_dim=self.latent_dim)
         self.validation_data_generator_one_batch = UVAEDataGenerator(
-            encoder=self.encoder,
+            vae=self.vae,
             image_paths=self.validation_image_paths,
             input_shape=input_shape,
             batch_size=1,
@@ -98,22 +98,33 @@ class UniformVectorizedAutoEncoder:
         return model(x, training=False)
 
     @tf.function
-    def compute_gradient_e(self, model, optimizer, batch_x, y_true):
+    def train_step_encoder(self, model, optimizer, x):
         with tf.GradientTape() as tape:
-            y_pred = model(batch_x, training=True)
-            loss = tf.reduce_mean(tf.square(tf.reduce_min(y_true, axis=0) - tf.reduce_min(y_pred, axis=0)))
-            loss += tf.reduce_mean(tf.square(tf.reduce_max(y_true, axis=0) - tf.reduce_max(y_pred, axis=0)))
-            loss += tf.reduce_mean(tf.square(tf.reduce_mean(y_true, axis=0) - tf.reduce_mean(y_pred, axis=0)))
-            loss /= 3.0
+            z_mean, z_log_var, z = model(x, training=True)
+            loss = -0.5 * (1.0 + z_log_var - K.square(z_mean) - K.exp(z_log_var))
+            loss = tf.reduce_mean(tf.reduce_sum(loss, axis=1), axis=0)
+            mean_loss = tf.reduce_mean(loss)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-        return loss
+        return mean_loss
 
-    def compute_gradient(self, model, optimizer, batch_x, y_true):
+    @tf.function
+    def train_step_vae(self, model, optimizer, x):
         with tf.GradientTape() as tape:
-            y_pred = model(batch_x, training=True)
-            loss = K.square(y_true - y_pred)
-            loss = tf.reduce_mean(loss, axis=0)
+            y_pred = model(x, training=True)
+            r_loss_factor = 1.0
+            # loss = tf.reduce_mean(K.square(x - y_pred), axis=0) * r_loss_factor
+            loss = tf.reduce_mean(K.binary_crossentropy(x, y_pred), axis=0)
+            mean_loss = tf.reduce_mean(K.square(x - y_pred))
+        gradients = tape.gradient(loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+        return mean_loss
+
+    @tf.function
+    def train_step_gan(self, model, optimizer, x, y_true):
+        with tf.GradientTape() as tape:
+            y_pred = model(x, training=True)
+            loss = tf.reduce_mean(K.binary_crossentropy(y_true, y_pred), axis=0)
             mean_loss = tf.reduce_mean(loss)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -122,32 +133,26 @@ class UniformVectorizedAutoEncoder:
     def evaluate(self, generator):
         loss_sum = 0.0
         for ae_x, ae_y, ae_mask in tqdm(generator):
-            y = self.graph_forward(self.ae, ae_x)
+            y = self.graph_forward(self.vae, ae_x)
             loss_sum += np.mean(np.abs(ae_y[0] - y[0]))
         return float(loss_sum / len(generator))
 
     def train(self):
         iteration_count = 0
-        optimizer_ae = tf.keras.optimizers.Adam(lr=self.lr)
-        optimizer_d = tf.keras.optimizers.Adam(lr=self.lr)
-        optimizer_gan = tf.keras.optimizers.Adam(lr=self.lr)
         optimizer_e = tf.keras.optimizers.Adam(lr=self.lr)
-        compute_gradient_ae = tf.function(self.compute_gradient)
-        compute_gradient_d = tf.function(self.compute_gradient)
-        compute_gradient_gan = tf.function(self.compute_gradient)
-        compute_gradient_e = self.compute_gradient_e
+        optimizer_vae = tf.keras.optimizers.Adam(lr=self.lr)
+        optimizer_gan = tf.keras.optimizers.Adam(lr=self.lr)
         os.makedirs(self.checkpoint_path, exist_ok=True)
         while True:
-            for ae_x, dx, dy, gan_y, ey in self.train_data_generator:
+            for vae_x, dx, dy, gan_y in self.train_data_generator:
                 iteration_count += 1
-                ae_loss = compute_gradient_ae(self.ae, optimizer_ae, ae_x, ae_x)
-                e_loss = self.compute_gradient_e(self.encoder, optimizer_e, ae_x, ey)
-                self.discriminator.trainable = True
-                d_loss = compute_gradient_d(self.discriminator, optimizer_d, dx, dy)
-                self.discriminator.trainable = False
-                gan_loss = compute_gradient_gan(self.gan, optimizer_gan, ae_x, gan_y)
-
-                print(f'\r[iteration count : {iteration_count:6d}] ae_loss => {ae_loss:.4f}, e_loss => {e_loss:.4f}, d_loss => {d_loss:.4f}, gan_loss => {gan_loss:.4f}', end='\t')
+                # self.discriminator.trainable = True
+                kl_loss = self.train_step_encoder(self.encoder, optimizer_e, vae_x)
+                reconstruction_loss = self.train_step_vae(self.vae, optimizer_vae, vae_x)
+                #self.discriminator.trainable = False
+                #adversarial_loss = self.train_step_gan(self.gan, optimizer_gan, vae_x, gan_y)
+                adversarial_loss = 0.0
+                print(f'\r[iteration count : {iteration_count:6d}] kl_loss => {kl_loss:.4f}, reconstruction_loss => {reconstruction_loss:.4f}, adversarial_loss => {adversarial_loss:.4f}', end='\t')
                 if self.training_view:
                     self.training_view_function()
                 if iteration_count % 5000 == 0:
@@ -176,24 +181,27 @@ class UniformVectorizedAutoEncoder:
             return cv2.resize(img, size, interpolation=cv2.INTER_LINEAR)
 
     def generate_random_image(self):
-        z = np.random.uniform(-1.0, 1.0, size=self.latent_dim).reshape((1, self.latent_dim))
+        z = np.random.normal(0.0, 1.0, size=self.latent_dim).reshape((1, self.latent_dim))
         y = self.graph_forward(self.decoder, z)
-        y = (y * 127.5) + 127.5
+        # y = (y * 127.5) + 127.5
+        y *= 255.0
         generated_image = np.clip(np.asarray(y).reshape(self.input_shape), 0.0, 255.0).astype('uint8')
         return generated_image
 
     def predict(self, img):
         img = self.resize(img, (self.input_shape[1], self.input_shape[0]))
         x = np.asarray(img).reshape((1,) + self.input_shape).astype('float32')
-        x = (x - 127.5) / 127.5
+        # x = (x - 127.5) / 127.5
+        x /= 255.0
         z = self.encoder(x, training=False)
         # with np.printoptions(precision=2, suppress=True):
         #     print(f'z : {z[0]}')
         cv2.imshow('random', self.generate_random_image())
 
-        y = self.ae(x, training=False)
-        y = np.asarray(y).reshape(self.input_shape)
-        y = (y * 127.5) + 127.5
+        y = self.vae(x, training=False)
+        y = np.asarray(y).reshape(self.input_shape).astype('float32')
+        # y = (y * 127.5) + 127.5
+        y *= 255.0
         decoded_img = np.clip(y, 0.0, 255.0).astype('uint8')
         return img, decoded_img
 
@@ -236,7 +244,7 @@ class UniformVectorizedAutoEncoder:
                 img_path = np.random.choice(self.validation_image_paths)
                 win_name = 'ae validation data'
                 self.view_flag = 1
-            input_shape = self.ae.input_shape[1:]
+            input_shape = self.vae.input_shape[1:]
             img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE if input_shape[-1] == 1 else cv2.IMREAD_COLOR)
             img, output_image = self.predict(img)
             img = self.resize(img, (input_shape[1], input_shape[0]))
