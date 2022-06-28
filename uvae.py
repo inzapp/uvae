@@ -150,12 +150,12 @@ class UniformVectorizedAutoEncoder:
         variance = tf.constant(self.calculate_variance(latent_dim=self.latent_dim), dtype=tf.dtypes.float32)
         os.makedirs(self.checkpoint_path, exist_ok=True)
         while True:
-            for ex, z_ex, z_dy, z_gan_y in self.train_data_generator:
+            for ex, z_dx, z_dy, z_gan_y in self.train_data_generator:
                 iteration_count += 1
                 reconstruction_loss = train_step_vae(self.vae, optimizer_vae, ex, ex)
                 distribution_loss = self.train_step_e(self.encoder, optimizer_e, ex, variance)
                 self.z_discriminator.trainable = True
-                z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_ex, z_dy)
+                z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
                 self.z_discriminator.trainable = False
                 z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, z_gan_y)
 
