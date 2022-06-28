@@ -27,11 +27,13 @@ from concurrent.futures.thread import ThreadPoolExecutor
 class UVAEDataGenerator(tf.keras.utils.Sequence):
     def __init__(self,
                  encoder,
+                 decoder,
                  image_paths,
                  input_shape,
                  batch_size,
                  latent_dim):
         self.encoder = encoder
+        self.decoder = decoder
         self.image_paths = image_paths
         self.input_shape = input_shape
         self.batch_size = batch_size
@@ -52,11 +54,33 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
             ex.append(x)
         ex = np.asarray(ex).reshape((self.batch_size,) + self.input_shape).astype('float32')
         ex = (ex - 127.5) / 127.5
-        z_dx = np.asarray([self.get_z_vector(size=self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.half_batch_size)])
-        z_dx = np.append(z_dx, np.asarray(self.graph_forward(self.encoder, ex[:self.half_batch_size])).reshape((self.half_batch_size, self.latent_dim)), axis=0).astype('float32')
+        half_ex = ex[:self.half_batch_size]
+        half_z_real = np.asarray(self.graph_forward(self.encoder, half_ex)).astype('float32')
+        half_z_fake = np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
+        half_z_fake2 = np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
+
+        z_dx_real = np.asarray([self.get_z_vector(size=self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.half_batch_size)])
+        z_dx_fake = half_z_real.reshape((self.half_batch_size, self.latent_dim))
+        z_dx = np.append(z_dx_real, z_dx_fake, axis=0).astype('float32')
         z_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
         z_gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
-        return ex, z_dx, z_dy, z_gan_y
+
+        d_dx_real = np.asarray(self.graph_forward(self.decoder, half_z_real)).reshape((self.half_batch_size,) + self.input_shape)
+        d_dx_fake = np.asarray(self.graph_forward(self.decoder, half_z_fake)).reshape((self.half_batch_size,) + self.input_shape)
+        d_dx = np.append(d_dx_real, d_dx_fake, axis=0).astype('float32')
+        d_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
+        d_gan_x = np.append(half_z_fake, half_z_fake2, axis=0)
+        d_gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
+
+        # print(f'z_dx.shape : {z_dx.shape}')
+        # print(f'z_dy.shape : {z_dy.shape}')
+        # print(f'd_dx.shape : {d_dx.shape}')
+        # print(f'd_dy.shape : {d_dy.shape}')
+        # print(f'z_gan_y.shape : {z_gan_y.shape}')
+        # print(f'd_gan_x.shape : {d_gan_x.shape}')
+        # print(f'd_gan_y.shape : {d_gan_y.shape}')
+        # exit(0)
+        return ex, z_dx, z_dy, d_dx, d_dy, z_gan_y, d_gan_x, d_gan_y
 
     @tf.function
     def graph_forward(self, model, x):

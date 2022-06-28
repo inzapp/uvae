@@ -68,18 +68,21 @@ class UniformVectorizedAutoEncoder:
             self.train_image_paths, self.validation_image_paths = self.init_image_paths(train_image_path, validation_split=validation_split)
         self.train_data_generator = UVAEDataGenerator(
             encoder=self.encoder,
+            decoder=self.decoder,
             image_paths=self.train_image_paths,
             input_shape=input_shape,
             batch_size=batch_size,
             latent_dim=self.latent_dim)
         self.validation_data_generator = UVAEDataGenerator(
             encoder=self.encoder,
+            decoder=self.decoder,
             image_paths=self.validation_image_paths,
             input_shape=input_shape,
             batch_size=batch_size,
             latent_dim=self.latent_dim)
         self.validation_data_generator_one_batch = UVAEDataGenerator(
             encoder=self.encoder,
+            decoder=self.decoder,
             image_paths=self.validation_image_paths,
             input_shape=input_shape,
             batch_size=1,
@@ -150,16 +153,22 @@ class UniformVectorizedAutoEncoder:
         variance = tf.constant(self.calculate_variance(latent_dim=self.latent_dim), dtype=tf.dtypes.float32)
         os.makedirs(self.checkpoint_path, exist_ok=True)
         while True:
-            for ex, z_dx, z_dy, z_gan_y in self.train_data_generator:
+            for ex, z_dx, z_dy, d_dx, d_dy, z_gan_y, d_gan_x, d_gan_y in self.train_data_generator:
                 iteration_count += 1
-                reconstruction_loss = train_step_vae(self.vae, optimizer_vae, ex, ex)
                 distribution_loss = self.train_step_e(self.encoder, optimizer_e, ex, variance)
+                reconstruction_loss = train_step_vae(self.vae, optimizer_vae, ex, ex)
+
                 self.z_discriminator.trainable = True
                 z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
                 self.z_discriminator.trainable = False
                 z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, z_gan_y)
 
-                print(f'\r[iteration count : {iteration_count:6d}] reconstruction_loss => {reconstruction_loss:.4f}, distribution_loss => {distribution_loss:.4f}, z_discriminator_loss => {z_discriminator_loss:.4f}, z_adversarial_loss => {z_adversarial_loss:.4f}', end='\t')
+                self.d_discriminator.trainable = True
+                d_discriminator_loss = train_step_d_d(self.d_discriminator, optimizer_d_d, d_dx, d_dy)
+                self.d_discriminator.trainable = False
+                d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, d_gan_y)
+
+                print(f'\r[iteration count : {iteration_count:6d}] reconstruction_loss => {reconstruction_loss:.4f}, distribution_loss => {distribution_loss:.4f}, z_discriminator_loss => {z_discriminator_loss:.4f}, z_adversarial_loss => {z_adversarial_loss:.4f}, d_discriminator_loss => {d_discriminator_loss:.4f}, d_adversarial_loss => {d_adversarial_loss:.4f}', end='\t')
                 if self.training_view:
                     self.training_view_function()
                 if iteration_count % 5000 == 0:

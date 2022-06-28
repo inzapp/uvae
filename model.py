@@ -94,7 +94,7 @@ class Model:
         self.conv2d(m, 64,  3, 2, 'relu')
         self.conv2d(m, 128, 3, 2, 'relu')
         self.conv2d(m, 256, 3, 2, 'relu')
-        self.conv2d(m, 1, 1, 1, 'sigmoid')
+        self.conv2d(m, 1, 1, 1, 'linear')
         self.gap(m)
         return m
 
