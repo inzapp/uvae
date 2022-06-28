@@ -55,12 +55,11 @@ class UniformVectorizedAutoEncoder:
         self.view_flag = 1
 
         self.model = Model(input_shape=input_shape, latent_dim=self.latent_dim)
+        self.ae, self.gan, self.encoder, self.decoder, self.discriminator = self.model.build()
         # if os.path.exists(pretrained_model_path) and os.path.isfile(pretrained_model_path):
         #     print(f'\npretrained model path : {[pretrained_model_path]}')
-        #     self.ae, self.input_shape = self.model.load(pretrained_model_path)
+        #     self.decoder = tf.keras.models.load_model(pretrained_model_path, compile=False)
         #     print(f'input_shape : {self.input_shape}')
-        # else:
-        self.ae, self.gan, self.encoder, self.decoder, self.discriminator = self.model.build()
 
         if validation_image_path != '':
             self.train_image_paths, _ = self.init_image_paths(train_image_path)
@@ -98,13 +97,12 @@ class UniformVectorizedAutoEncoder:
         return model(x, training=False)
 
     @tf.function
-    def compute_gradient_e(self, model, optimizer, batch_x, y_true):
+    def compute_gradient_e(self, model, optimizer, x, variance):
         with tf.GradientTape() as tape:
-            y_pred = model(batch_x, training=True)
-            loss = tf.reduce_mean(tf.square(tf.reduce_min(y_true, axis=0) - tf.reduce_min(y_pred, axis=0)))
-            loss += tf.reduce_mean(tf.square(tf.reduce_max(y_true, axis=0) - tf.reduce_max(y_pred, axis=0)))
-            loss += tf.reduce_mean(tf.square(tf.reduce_mean(y_true, axis=0) - tf.reduce_mean(y_pred, axis=0)))
-            loss /= 3.0
+            y_pred = model(x, training=True)
+            loss_mean = K.square(0.0 - tf.reduce_mean(y_pred))
+            loss_var = K.square(variance - tf.math.reduce_variance(y_pred))
+            loss = loss_mean + loss_var
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss
@@ -126,6 +124,15 @@ class UniformVectorizedAutoEncoder:
             loss_sum += np.mean(np.abs(ae_y[0] - y[0]))
         return float(loss_sum / len(generator))
 
+    def calculate_variance(self, latent_dim):
+        var_sum = 0.0
+        for _ in tqdm(range(10000)):
+            z = UVAEDataGenerator.get_z_vector(size=latent_dim)
+            var_sum += np.var(z)
+        var = var_sum / 10000.0
+        print(f'variance : {var:.4f}')
+        return var
+
     def train(self):
         iteration_count = 0
         optimizer_ae = tf.keras.optimizers.Adam(lr=self.lr)
@@ -136,15 +143,19 @@ class UniformVectorizedAutoEncoder:
         compute_gradient_d = tf.function(self.compute_gradient)
         compute_gradient_gan = tf.function(self.compute_gradient)
         compute_gradient_e = self.compute_gradient_e
+        variance = self.calculate_variance(latent_dim=self.latent_dim)
         os.makedirs(self.checkpoint_path, exist_ok=True)
         while True:
             for ae_x, dx, dy, gan_y, ey in self.train_data_generator:
                 iteration_count += 1
                 ae_loss = compute_gradient_ae(self.ae, optimizer_ae, ae_x, ae_x)
-                e_loss = self.compute_gradient_e(self.encoder, optimizer_e, ae_x, ey)
+                e_loss = 0.0
+                e_loss = self.compute_gradient_e(self.encoder, optimizer_e, ae_x, tf.constant(variance, dtype=tf.dtypes.float32))
+                d_loss = 0.0
                 self.discriminator.trainable = True
                 d_loss = compute_gradient_d(self.discriminator, optimizer_d, dx, dy)
                 self.discriminator.trainable = False
+                gan_loss = 0.0
                 gan_loss = compute_gradient_gan(self.gan, optimizer_gan, ae_x, gan_y)
 
                 print(f'\r[iteration count : {iteration_count:6d}] ae_loss => {ae_loss:.4f}, e_loss => {e_loss:.4f}, d_loss => {d_loss:.4f}, gan_loss => {gan_loss:.4f}', end='\t')
@@ -175,12 +186,29 @@ class UniformVectorizedAutoEncoder:
         else:
             return cv2.resize(img, size, interpolation=cv2.INTER_LINEAR)
 
+    def generate(self):
+        while True:
+            generated_image = self.generate_random_image()
+            cv2.imshow('generated image', generated_image)
+            key = cv2.waitKey(0)
+            if key == 27:
+                break
+
     def generate_random_image(self):
-        z = np.random.uniform(-1.0, 1.0, size=self.latent_dim).reshape((1, self.latent_dim))
+        z = UVAEDataGenerator.get_z_vector(size=self.latent_dim).reshape((1, self.latent_dim))
         y = self.graph_forward(self.decoder, z)
         y = (y * 127.5) + 127.5
         generated_image = np.clip(np.asarray(y).reshape(self.input_shape), 0.0, 255.0).astype('uint8')
         return generated_image
+
+    def plot_z_distribution(self, x):
+        import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        z = np.asarray(self.graph_forward(self.encoder, x)).reshape(-1)
+        plt.clf()
+        plt.hist(z, bins=50)
+        plt.draw()
+        plt.pause(1e-3)
 
     def predict(self, img):
         img = self.resize(img, (self.input_shape[1], self.input_shape[0]))
@@ -190,6 +218,7 @@ class UniformVectorizedAutoEncoder:
         # with np.printoptions(precision=2, suppress=True):
         #     print(f'z : {z[0]}')
         cv2.imshow('random', self.generate_random_image())
+        self.plot_z_distribution(x)
 
         y = self.ae(x, training=False)
         y = np.asarray(y).reshape(self.input_shape)
