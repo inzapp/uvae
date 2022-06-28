@@ -30,9 +30,11 @@ class Model:
         self.input_shape = input_shape
         self.encoder = None
         self.decoder = None
-        self.ae = None
-        self.discriminator = None
-        self.gan = None
+        self.vae = None
+        self.z_discriminator = None
+        self.d_discriminator = None
+        self.z_gan = None
+        self.d_gan = None
         self.latent_dim = latent_dim
 
     def build(self):
@@ -40,15 +42,17 @@ class Model:
         assert self.input_shape[1] % 32 == 0
         self.encoder = self.build_encoder()
         self.decoder = self.build_decoder()
-        self.discriminator = self.build_discriminator()
-        self.ae = tf.keras.models.Sequential([self.encoder, self.decoder])
-        self.gan = tf.keras.models.Sequential([self.encoder, self.discriminator])
-        return self.ae, self.gan, self.encoder, self.decoder, self.discriminator
+        self.z_discriminator = self.build_z_discriminator()
+        self.d_discriminator = self.build_d_discriminator()
+        self.vae = tf.keras.models.Sequential([self.encoder, self.decoder])
+        self.z_gan = tf.keras.models.Sequential([self.encoder, self.z_discriminator])
+        self.d_gan = tf.keras.models.Sequential([self.decoder, self.d_discriminator])
+        return self.encoder, self.decoder, self.z_discriminator, self.d_discriminator, self.vae, self.z_gan, self.d_gan
 
     # def load(self, model_path):
-    #     self.ae = tf.keras.models.load_model(model_path, compile=False)
-    #     self.input_shape = self.ae.input_shape[1:]
-    #     return self.ae, self.input_shape
+    #     self.vae = tf.keras.models.load_model(model_path, compile=False)
+    #     self.input_shape = self.vae.input_shape[1:]
+    #     return self.vae, self.input_shape
 
     def build_encoder(self):
         m = tf.keras.models.Sequential()
@@ -76,11 +80,22 @@ class Model:
         self.conv2d_transpose(m, self.input_shape[-1], 1, 1, 'tanh')
         return m
 
-    def build_discriminator(self):
+    def build_z_discriminator(self):
         m = tf.keras.models.Sequential()
         self.dense(m, 256, 'relu', input_shape=(self.latent_dim,))
         self.dense(m, 256, 'relu')
         self.dense(m, 1, 'linear')
+        return m
+
+    def build_d_discriminator(self):
+        m = tf.keras.models.Sequential()
+        self.conv2d(m, 16,  3, 2, 'relu', input_shape=self.input_shape)
+        self.conv2d(m, 32,  3, 2, 'relu')
+        self.conv2d(m, 64,  3, 2, 'relu')
+        self.conv2d(m, 128, 3, 2, 'relu')
+        self.conv2d(m, 256, 3, 2, 'relu')
+        self.conv2d(m, 1, 1, 1, 'sigmoid')
+        self.gap(m)
         return m
 
     def conv2d(self, m, filters, kernel_size, strides=1, activation='relu', input_shape=()):
@@ -119,12 +134,12 @@ class Model:
         m.add(tf.keras.layers.GlobalAveragePooling2D())
 
     # def save(self, path, iteration_count, loss):
-    #     self.ae.save(f'{path}/ae_{iteration_count}_iter_{loss:.4f}_loss.h5', include_optimizer=False)
+    #     self.vae.save(f'{path}/ae_{iteration_count}_iter_{loss:.4f}_loss.h5', include_optimizer=False)
 
     def summary(self):
         self.encoder.summary()
         print()
         self.decoder.summary()
         print()
-        self.discriminator.summary()
+        self.z_discriminator.summary()
 
