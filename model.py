@@ -82,8 +82,8 @@ class Model:
 
     def build_z_discriminator(self):
         m = tf.keras.models.Sequential()
-        self.dense(m, 256, 'leaky', input_shape=(self.latent_dim,))
-        self.dense(m, 256, 'leaky')
+        self.dense(m, 256, 'relu', input_shape=(self.latent_dim,))
+        self.dense(m, 256, 'relu')
         self.dense(m, 1, 'linear')
         return m
 
