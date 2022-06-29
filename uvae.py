@@ -55,9 +55,8 @@ class UniformVectorizedAutoEncoder:
         self.latent_dim = latent_dim
         self.checkpoint_path = checkpoint_path
         self.view_grid_size = view_grid_size
-        self.view_flag = 1
         plt.style.use(['dark_background'])
-        plt.tight_layout(1.0)
+        plt.tight_layout(0.5)
         self.fig, _ = plt.subplots()
 
         self.model = Model(input_shape=input_shape, latent_dim=self.latent_dim)
@@ -110,7 +109,7 @@ class UniformVectorizedAutoEncoder:
             y_pred = model(x, training=True)
             loss_mean = K.square(tf.reduce_mean(y_pred))
             loss_var = K.square(variance - tf.math.reduce_variance(y_pred))
-            loss = loss_mean + loss_var
+            loss = (loss_mean + loss_var) * 0.5
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss
@@ -161,14 +160,19 @@ class UniformVectorizedAutoEncoder:
         while True:
             for ex, z_dx, z_dy, d_dx, d_dy, z_gan_y, d_gan_x, d_gan_y in self.train_data_generator:
                 iteration_count += 1
+                distribution_loss = 0.0
                 distribution_loss = self.train_step_e(self.encoder, optimizer_e, ex, variance)
                 reconstruction_loss = train_step_vae(self.vae, optimizer_vae, ex, ex)
 
+                z_discriminator_loss = 0.0
+                z_adversarial_loss = 0.0
                 self.z_discriminator.trainable = True
                 z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
                 self.z_discriminator.trainable = False
                 z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, z_gan_y)
 
+                d_adversarial_loss = 0.0
+                d_discriminator_loss = 0.0
                 self.d_discriminator.trainable = True
                 d_discriminator_loss = train_step_d_d(self.d_discriminator, optimizer_d_d, d_dx, d_dy)
                 self.d_discriminator.trainable = False
@@ -217,6 +221,20 @@ class UniformVectorizedAutoEncoder:
         generated_images = np.clip(np.asarray(y).reshape((size,) + self.input_shape), 0.0, 255.0).astype('uint8')
         return generated_images[0] if size == 1 else generated_images
 
+    def generate_latent_space_2d(self, split_size=10):
+        assert split_size > 1
+        assert self.latent_dim == 2
+        space = np.linspace(-1.0, 1.0, split_size)
+        z = []
+        for i in range(split_size):
+            for j in range(split_size):
+                z.append([space[i], space[j]])
+        z = np.asarray(z).reshape((split_size * split_size, 2)).astype('float32')
+        y = self.graph_forward(self.decoder, z)
+        y = (y * 127.5) + 127.5
+        generated_images = np.clip(np.asarray(y).reshape((split_size * split_size,) + self.input_shape), 0.0, 255.0).astype('uint8')
+        return generated_images
+
     def predict(self, img):
         img = self.resize(img, (self.input_shape[1], self.input_shape[0]))
         x = np.asarray(img).reshape((1,) + self.input_shape).astype('float32')
@@ -259,7 +277,8 @@ class UniformVectorizedAutoEncoder:
 
     def make_z_distribution_image(self, z):
         plt.clf()
-        plt.hist(z)
+        plt.hist(z, bins=self.latent_dim if self.latent_dim < 20 else 20)
+        # plt.plot(z)
         self.fig.canvas.draw()
         width, height = self.fig.canvas.get_width_height()
         img = np.frombuffer(self.fig.canvas.tostring_rgb(), dtype=np.uint8).reshape((height, width, 3))
@@ -301,6 +320,7 @@ class UniformVectorizedAutoEncoder:
 
         generated_images_cat = None
         generated_images = self.generate_random_image(size=self.view_grid_size * self.view_grid_size)
+        # generated_images = self.generate_latent_space_2d(split_size=self.view_grid_size)
         for i in range(self.view_grid_size):
             line = None
             for j in range(self.view_grid_size):
