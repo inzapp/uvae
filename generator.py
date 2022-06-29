@@ -65,7 +65,7 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         z_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
         z_gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
 
-        d_dx_real = np.asarray(self.graph_forward(self.decoder, half_z_real)).reshape((self.half_batch_size,) + self.input_shape)
+        d_dx_real = half_ex
         d_dx_fake = np.asarray(self.graph_forward(self.decoder, half_z_fake)).reshape((self.half_batch_size,) + self.input_shape)
         d_dx = np.append(d_dx_real, d_dx_fake, axis=0).astype('float32')
         d_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
