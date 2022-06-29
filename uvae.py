@@ -22,6 +22,7 @@ import natsort
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.backend as K
+import matplotlib.pyplot as plt
 
 from cv2 import cv2
 from glob import glob
@@ -35,7 +36,7 @@ class UniformVectorizedAutoEncoder:
     def __init__(self,
                  train_image_path=None,
                  input_shape=(64, 64, 1),
-                 lr=0.001,
+                 lr=0.0005,
                  batch_size=32,
                  latent_dim=128,
                  iterations=100000,
@@ -43,6 +44,7 @@ class UniformVectorizedAutoEncoder:
                  validation_image_path='',
                  checkpoint_path='checkpoints',
                  pretrained_model_path='',
+                 view_grid_size=4,
                  training_view=False):
         self.lr = lr
         self.iterations = iterations
@@ -52,7 +54,11 @@ class UniformVectorizedAutoEncoder:
         self.batch_size = batch_size
         self.latent_dim = latent_dim
         self.checkpoint_path = checkpoint_path
+        self.view_grid_size = 4
         self.view_flag = 1
+        plt.style.use(['dark_background'])
+        plt.tight_layout(1.0)
+        self.fig, _ = plt.subplots()
 
         self.model = Model(input_shape=input_shape, latent_dim=self.latent_dim)
         self.encoder, self.decoder, self.z_discriminator, self.d_discriminator, self.vae, self.z_gan, self.d_gan = self.model.build()
@@ -224,17 +230,17 @@ class UniformVectorizedAutoEncoder:
         img = self.resize(img, (self.input_shape[1], self.input_shape[0]))
         x = np.asarray(img).reshape((1,) + self.input_shape).astype('float32')
         x = (x - 127.5) / 127.5
-        z = self.encoder(x, training=False)
+        z = np.asarray(self.graph_forward(self.encoder, x)).reshape(-1)
         # with np.printoptions(precision=2, suppress=True):
         #     print(f'z : {z[0]}')
         cv2.imshow('random', self.generate_random_image())
-        self.plot_z_distribution(x)
+        # self.plot_z_distribution(x)
 
         y = self.vae(x, training=False)
         y = np.asarray(y).reshape(self.input_shape)
         y = (y * 127.5) + 127.5
         decoded_img = np.clip(y, 0.0, 255.0).astype('uint8')
-        return img, decoded_img
+        return img, decoded_img, z
 
     def predict_images(self, image_paths):
         """
@@ -246,7 +252,7 @@ class UniformVectorizedAutoEncoder:
         with tf.device('/cpu:0'):
             for path in image_paths:
                 img = cv2.imread(path, cv2.IMREAD_GRAYSCALE if self.input_shape[-1] == 1 else cv2.IMREAD_COLOR)
-                img, output_image = self.predict(img)
+                img, output_image, _ = self.predict(img)
                 img = self.resize(img, (self.input_shape[1], self.input_shape[0]))
                 img = np.asarray(img).reshape(img.shape[:2] + (self.input_shape[-1],))
                 cv2.imshow('ae', np.concatenate((img, output_image), axis=1))
@@ -260,24 +266,77 @@ class UniformVectorizedAutoEncoder:
     def predict_validation_images(self):
         self.predict_images(self.validation_image_paths)
 
+    # def training_view_function(self):
+    #     """
+    #     During training, the image is forwarded in real time, showing the results are shown.
+    #     """
+    #     cur_time = time()
+    #     if cur_time - self.live_view_previous_time > 0.5:
+    #         self.live_view_previous_time = cur_time
+    #         if self.view_flag == 1:
+    #             img_path = np.random.choice(self.train_image_paths)
+    #             win_name = 'ae train data'
+    #             self.view_flag = 0
+    #         else:
+    #             img_path = np.random.choice(self.validation_image_paths)
+    #             win_name = 'ae validation data'
+    #             self.view_flag = 1
+    #         input_shape = self.vae.input_shape[1:]
+    #         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE if input_shape[-1] == 1 else cv2.IMREAD_COLOR)
+    #         img, output_image, _ = self.predict(img)
+    #         img = self.resize(img, (input_shape[1], input_shape[0]))
+    #         cv2.imshow(win_name, np.concatenate((img.reshape(input_shape), output_image), axis=1))
+    #         cv2.waitKey(1)
+
+    def make_border(self, img, size=10):
+        return cv2.copyMakeBorder(img, size, size, size, size, None, value=127) 
+
+    def make_z_distribution_image(self, z):
+        plt.clf()
+        plt.hist(z)
+        self.fig.canvas.draw()
+        width, height = self.fig.canvas.get_width_height()
+        img = np.frombuffer(self.fig.canvas.tostring_rgb(), dtype=np.uint8).reshape((height, width, 3))
+        size = self.input_shape[0]
+        img = self.resize(img, (size, size))
+        if self.input_shape[-1] == 1:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        else:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        return img
+
     def training_view_function(self):
         """
         During training, the image is forwarded in real time, showing the results are shown.
         """
         cur_time = time()
-        if cur_time - self.live_view_previous_time > 0.5:
-            self.live_view_previous_time = cur_time
-            if self.view_flag == 1:
-                img_path = np.random.choice(self.train_image_paths)
-                win_name = 'ae train data'
-                self.view_flag = 0
-            else:
-                img_path = np.random.choice(self.validation_image_paths)
-                win_name = 'ae validation data'
-                self.view_flag = 1
-            input_shape = self.vae.input_shape[1:]
-            img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE if input_shape[-1] == 1 else cv2.IMREAD_COLOR)
-            img, output_image = self.predict(img)
+        if cur_time - self.live_view_previous_time < 2.0:
+            return
+        self.live_view_previous_time = cur_time
+        img_paths = np.random.choice(self.train_image_paths, size=self.view_grid_size, replace=False)
+        win_name = 'training view'
+        input_shape = self.vae.input_shape[1:]
+
+        # make decoded image pairs
+        decoded_img = None
+        for img_path in img_paths:
+            img = cv2.imdecode(np.fromfile(img_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE if input_shape[-1] == 1 else cv2.IMREAD_COLOR)
+            img, output_image, z = self.predict(img)
             img = self.resize(img, (input_shape[1], input_shape[0]))
-            cv2.imshow(win_name, np.concatenate((img.reshape(input_shape), output_image), axis=1))
-            cv2.waitKey(1)
+            img, output_image = self.make_border(img), self.make_border(output_image)
+            z_image = self.make_border(self.make_z_distribution_image(z))
+            img = img.reshape(img.shape + (1,))
+            output_image = output_image.reshape(output_image.shape + (1,))
+            z_image = z_image.reshape(z_image.shape + (1,))
+            # print(img.shape)
+            # print(output_image.shape)
+            # print(z_image.shape)
+            # exit(0)
+
+            imgs = np.concatenate([img, output_image, z_image], axis=1)
+            if decoded_img is None:
+                decoded_img = imgs
+            else:
+                decoded_img = np.append(decoded_img, imgs, axis=0)
+        cv2.imshow('decoded_images', decoded_img)
+        cv2.waitKey(1)
