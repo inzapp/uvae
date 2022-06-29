@@ -54,7 +54,7 @@ class UniformVectorizedAutoEncoder:
         self.batch_size = batch_size
         self.latent_dim = latent_dim
         self.checkpoint_path = checkpoint_path
-        self.view_grid_size = 4
+        self.view_grid_size = view_grid_size
         self.view_flag = 1
         plt.style.use(['dark_background'])
         plt.tight_layout(1.0)
