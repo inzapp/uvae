@@ -37,7 +37,7 @@ class UniformVectorizedAutoEncoder:
                  input_shape=(64, 64, 1),
                  lr=0.001,
                  batch_size=32,
-                 latent_dim=16,
+                 latent_dim=128,
                  iterations=100000,
                  validation_split=0.2,
                  validation_image_path='',
@@ -102,7 +102,7 @@ class UniformVectorizedAutoEncoder:
     def train_step_e(self, model, optimizer, x, variance):
         with tf.GradientTape() as tape:
             y_pred = model(x, training=True)
-            loss_mean = K.square(0.0 - tf.reduce_mean(y_pred))
+            loss_mean = K.square(tf.reduce_mean(y_pred))
             loss_var = K.square(variance - tf.math.reduce_variance(y_pred))
             loss = loss_mean + loss_var
         gradients = tape.gradient(loss, model.trainable_variables)
