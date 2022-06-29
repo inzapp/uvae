@@ -82,47 +82,53 @@ class Model:
 
     def build_z_discriminator(self):
         m = tf.keras.models.Sequential()
-        self.dense(m, 256, 'relu', input_shape=(self.latent_dim,))
-        self.dense(m, 256, 'relu')
+        self.dense(m, 256, 'leaky', input_shape=(self.latent_dim,))
+        self.dense(m, 256, 'leaky')
         self.dense(m, 1, 'linear')
         return m
 
     def build_d_discriminator(self):
         m = tf.keras.models.Sequential()
-        self.conv2d(m, 16,  3, 2, 'relu', input_shape=self.input_shape)
-        self.conv2d(m, 32,  3, 2, 'relu')
-        self.conv2d(m, 64,  3, 2, 'relu')
-        self.conv2d(m, 128, 3, 2, 'relu')
-        self.conv2d(m, 256, 3, 2, 'relu')
+        self.conv2d(m, 16,  3, 2, 'leaky', input_shape=self.input_shape)
+        self.conv2d(m, 32,  3, 2, 'leaky')
+        self.conv2d(m, 64,  3, 2, 'leaky')
+        self.conv2d(m, 128, 3, 2, 'leaky')
+        self.conv2d(m, 256, 3, 2, 'leaky')
         self.conv2d(m, 1, 1, 1, 'linear')
         self.gap(m)
         return m
 
-    def conv2d(self, m, filters, kernel_size, strides=1, activation='relu', input_shape=()):
+    def conv2d(self, m, filters, kernel_size, strides=1, activation='relu', alpha=0.2, input_shape=()):
         m.add(tf.keras.layers.Conv2D(
             strides=strides,
             filters=filters,
             padding='same',
             kernel_size=kernel_size,
             kernel_initializer='he_normal',
-            activation=activation,
             input_shape=input_shape))
+        self.activation(m, activation)
 
-    def conv2d_transpose(self, m, filters, kernel_size, strides=1, activation='relu', input_shape=()):
+    def conv2d_transpose(self, m, filters, kernel_size, strides=1, activation='relu', alpha=0.2, input_shape=()):
         m.add(tf.keras.layers.Conv2DTranspose(
             strides=strides,
             filters=filters,
             padding='same',
             kernel_size=kernel_size,
             kernel_initializer='he_normal',
-            activation=activation,
             input_shape=input_shape))
+        self.activation(m, activation)
 
-    def dense(self, m, units, activation='relu', input_shape=()):
+    def dense(self, m, units, activation='relu', alpha=0.2, input_shape=()):
         m.add(tf.keras.layers.Dense(
             units=units,
-            kernel_initializer='he_normal',
-            activation=activation))
+            kernel_initializer='he_normal'))
+        self.activation(m, activation)
+
+    def activation(self, m, activation, alpha=0.2):
+        if activation == 'leaky':
+            m.add(tf.keras.layers.LeakyReLU(alpha=alpha))
+        else:
+            m.add(tf.keras.layers.Activation(activation=activation))
 
     def reshape(self, m, target_shape):
         m.add(tf.keras.layers.Reshape(target_shape=target_shape))
