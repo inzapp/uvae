@@ -161,7 +161,7 @@ class UniformVectorizedAutoEncoder:
             for ex, z_dx, z_dy, d_dx, d_dy, z_gan_y, d_gan_x, d_gan_y in self.train_data_generator:
                 iteration_count += 1
                 distribution_loss = 0.0
-                distribution_loss = self.train_step_e(self.encoder, optimizer_e, ex, variance)
+                # distribution_loss = self.train_step_e(self.encoder, optimizer_e, ex, variance)
                 reconstruction_loss = train_step_vae(self.vae, optimizer_vae, ex, ex)
 
                 z_discriminator_loss = 0.0
@@ -173,10 +173,10 @@ class UniformVectorizedAutoEncoder:
 
                 d_adversarial_loss = 0.0
                 d_discriminator_loss = 0.0
-                self.d_discriminator.trainable = True
-                d_discriminator_loss = train_step_d_d(self.d_discriminator, optimizer_d_d, d_dx, d_dy)
-                self.d_discriminator.trainable = False
-                d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, d_gan_y)
+                # self.d_discriminator.trainable = True
+                # d_discriminator_loss = train_step_d_d(self.d_discriminator, optimizer_d_d, d_dx, d_dy)
+                # self.d_discriminator.trainable = False
+                # d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, d_gan_y)
 
                 print(f'\r[iteration count : {iteration_count:6d}] reconstruction_loss => {reconstruction_loss:.4f}, distribution_loss => {distribution_loss:.4f}, z_discriminator_loss => {z_discriminator_loss:.4f}, z_adversarial_loss => {z_adversarial_loss:.4f}, d_discriminator_loss => {d_discriminator_loss:.4f}, d_adversarial_loss => {d_adversarial_loss:.4f}', end='\t')
                 if self.training_view:
@@ -272,6 +272,18 @@ class UniformVectorizedAutoEncoder:
     def predict_validation_images(self):
         self.predict_images(self.validation_image_paths)
 
+    def show_interpolation(self, frame=100):
+        space = np.linspace(-1.0, 1.0, frame)
+        for val in space:
+            z = np.zeros(shape=(1, self.latent_dim), dtype=np.float32) + val
+            y = np.asarray(self.graph_forward(self.decoder, z))
+            y = (y * 127.5) + 127.5
+            generated_image = np.clip(np.asarray(y).reshape(self.input_shape), 0.0, 255.0).astype('uint8')
+            cv2.imshow('interpolation', generated_image)
+            key = cv2.waitKey(10)
+            if key == 27:
+                break
+
     def make_border(self, img, size=5):
         return cv2.copyMakeBorder(img, size, size, size, size, None, value=192) 
 
@@ -333,6 +345,7 @@ class UniformVectorizedAutoEncoder:
                 generated_images_cat = line
             else:
                 generated_images_cat = np.append(generated_images_cat, line, axis=0)
+        # self.show_interpolation()
         cv2.imshow('decoded_images', decoded_images_cat)
         cv2.imshow('generated_images', generated_images_cat)
         cv2.waitKey(1)
