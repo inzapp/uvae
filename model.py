@@ -63,6 +63,7 @@ class Model:
         self.conv2d(m, 256, 3, 2, 'relu')
         self.flatten(m)
         self.dense(m, self.latent_dim, 'tanh')
+        # self.noise_layer(m)
         return m
 
     def build_decoder(self):
@@ -97,6 +98,16 @@ class Model:
         self.conv2d(m, 1, 1, 1, 'linear')
         self.gap(m)
         return m
+
+    def noise_layer(self, m):
+        m.add(tf.keras.layers.Lambda(self.noise))
+
+    def noise(self, f):
+        import tensorflow.keras.backend as K
+        # f += tf.random.normal(shape=K.shape(f), mean=0.0, stddev=0.1)
+        f += tf.random.uniform(shape=K.shape(f), minval=-0.1, maxval=0.1)
+        # f = K.clip(f, -1.0, 1.0)
+        return f
 
     def conv2d(self, m, filters, kernel_size, strides=1, activation='relu', alpha=0.2, input_shape=()):
         m.add(tf.keras.layers.Conv2D(
