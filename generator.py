@@ -54,23 +54,23 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
             ex.append(x)
         ex = np.asarray(ex).reshape((self.batch_size,) + self.input_shape).astype('float32')
         ex = (ex - 127.5) / 127.5
-        half_ex = ex[:self.half_batch_size]
-        half_z_real = np.asarray(self.graph_forward(self.encoder, half_ex)).astype('float32')
-        half_z_fake = np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
-        half_z_fake2 = np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
+        # half_ex = ex[:self.half_batch_size]
+        # half_z_real = np.asarray(self.graph_forward(self.encoder, half_ex)).astype('float32')
+        # half_z_fake = np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
+        # half_z_fake2 = np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
 
-        z_dx_real = np.asarray([self.get_z_vector(size=self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.half_batch_size)])
-        z_dx_fake = half_z_real.reshape((self.half_batch_size, self.latent_dim))
-        z_dx = np.append(z_dx_real, z_dx_fake, axis=0).astype('float32')
-        z_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
-        z_gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
+        # z_dx_real = np.asarray([self.get_z_vector(size=self.latent_dim).reshape((self.latent_dim,)) for _ in range(self.half_batch_size)])
+        # z_dx_fake = half_z_real.reshape((self.half_batch_size, self.latent_dim))
+        # z_dx = np.append(z_dx_real, z_dx_fake, axis=0).astype('float32')
+        # z_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
+        # z_gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
 
-        d_dx_real = half_ex
-        d_dx_fake = np.asarray(self.graph_forward(self.decoder, half_z_fake)).reshape((self.half_batch_size,) + self.input_shape)
-        d_dx = np.append(d_dx_real, d_dx_fake, axis=0).astype('float32')
-        d_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
-        d_gan_x = np.append(half_z_fake, half_z_fake2, axis=0)
-        d_gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
+        # d_dx_real = half_ex
+        # d_dx_fake = np.asarray(self.graph_forward(self.decoder, half_z_fake)).reshape((self.half_batch_size,) + self.input_shape)
+        # d_dx = np.append(d_dx_real, d_dx_fake, axis=0).astype('float32')
+        # d_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
+        # d_gan_x = np.append(half_z_fake, half_z_fake2, axis=0)
+        # d_gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
 
         # print(f'z_dx.shape : {z_dx.shape}')
         # print(f'z_dy.shape : {z_dy.shape}')
@@ -80,14 +80,16 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         # print(f'd_gan_x.shape : {d_gan_x.shape}')
         # print(f'd_gan_y.shape : {d_gan_y.shape}')
         # exit(0)
-        return ex, z_dx, z_dy, d_dx, d_dy, z_gan_y, d_gan_x, d_gan_y
+
+        # return ex, z_dx, z_dy, d_dx, d_dy, z_gan_y, d_gan_x, d_gan_y
+        return ex
 
     @tf.function
     def graph_forward(self, model, x):
         return model(x, training=False)
 
     @staticmethod
-    def get_z_vector(size, mode='normal_norm', add_noise=False):
+    def get_z_vector(size, mode='normal', add_noise=False):
         if mode == 'uniform':
             z = np.random.uniform(-1.0, 1.0, size=size)
         elif mode == 'normal':
