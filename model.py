@@ -42,12 +42,13 @@ class Model:
         assert self.input_shape[1] % 32 == 0
         self.encoder = self.build_encoder()
         self.decoder = self.build_decoder()
+        self.decoder_no_noise = tf.keras.models.Sequential(self.decoder.layers[1:])
         self.z_discriminator = self.build_z_discriminator()
         self.d_discriminator = self.build_d_discriminator()
         self.vae = tf.keras.models.Sequential([self.encoder, self.decoder])
         self.z_gan = tf.keras.models.Sequential([self.encoder, self.z_discriminator])
         self.d_gan = tf.keras.models.Sequential([self.decoder, self.d_discriminator])
-        return self.encoder, self.decoder, self.z_discriminator, self.d_discriminator, self.vae, self.z_gan, self.d_gan
+        return self.encoder, self.decoder_no_noise, self.z_discriminator, self.d_discriminator, self.vae, self.z_gan, self.d_gan
 
     # def load(self, model_path):
     #     self.vae = tf.keras.models.load_model(model_path, compile=False)
@@ -63,7 +64,6 @@ class Model:
         self.conv2d(m, 256, 3, 2, 'relu')
         self.flatten(m)
         self.dense(m, self.latent_dim, 'tanh')
-        # self.noise_layer(m)
         return m
 
     def build_decoder(self):
@@ -71,6 +71,7 @@ class Model:
         target_rows = self.input_shape[0] // 32
         target_cols = self.input_shape[1] // 32
         target_channels = 256
+        self.noise_layer(m)
         self.dense(m, target_rows * target_cols * target_channels, input_shape=(self.latent_dim,))
         self.reshape(m, (target_rows, target_cols, target_channels))
         self.conv2d_transpose(m, 256, 3, 2, 'relu')
@@ -104,9 +105,11 @@ class Model:
 
     def noise(self, f):
         import tensorflow.keras.backend as K
-        # f += tf.random.normal(shape=K.shape(f), mean=0.0, stddev=0.1)
-        f += tf.random.uniform(shape=K.shape(f), minval=-0.1, maxval=0.1)
-        # f = K.clip(f, -1.0, 1.0)
+        # f *= tf.random.normal(shape=K.shape(f), mean=0.0, stddev=1.0)
+        # f *= tf.random.normal(shape=K.shape(f), mean=0.5, stddev=0.5)
+        f *= tf.random.uniform(shape=K.shape(f), minval=0.0, maxval=1.0)
+        # f += tf.random.uniform(shape=K.shape(f), minval=-1.0, maxval=1.0)
+        f = K.clip(f, -1.0, 1.0)
         return f
 
     def conv2d(self, m, filters, kernel_size, strides=1, activation='relu', alpha=0.2, input_shape=()):

@@ -87,11 +87,19 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         return model(x, training=False)
 
     @staticmethod
-    def get_z_vector(size):
-        z = np.random.normal(loc=-1.0, scale=0.01, size=size)
-        z -= np.min(z)
-        z /= np.max(z)
-        z = z * 2.0 - 1.0
+    def get_z_vector(size, mode='normal_norm', add_noise=False):
+        if mode == 'uniform':
+            z = np.random.uniform(-1.0, 1.0, size=size)
+        elif mode == 'normal':
+            z = np.random.normal(loc=0.0, scale=1.0, size=size)
+        elif mode == 'normal_norm':
+            z = np.random.normal(loc=0.0, scale=0.1, size=size)
+            z -= np.min(z)
+            z /= np.max(z)
+            z = z * 2.0 - 1.0
+        if add_noise:
+            z *= np.random.normal(loc=0.0, scale=1.0, size=size)
+        z = np.clip(z, -1.0, 1.0)
         return z
 
     def next_image_path(self):
