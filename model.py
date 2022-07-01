@@ -45,16 +45,15 @@ class Model:
         decoder_input, decoder_output = self.build_decoder()
         self.encoder = tf.keras.models.Model(encoder_input, [z_mean, z_log_var, z])
         self.decoder = tf.keras.models.Model(decoder_input, decoder_output)
-        # self.decoder_no_noise = tf.keras.models.Sequential(self.decoder.layers[1:])
         z_discriminator_input, z_discriminator_output = self.build_z_discriminator()
         d_discriminator_input, d_discriminator_output = self.build_d_discriminator()
         self.z_discriminator = tf.keras.models.Model(z_discriminator_input, z_discriminator_output)
         self.d_discriminator = tf.keras.models.Model(d_discriminator_input, d_discriminator_output)
         vae_output = self.decoder(z)
-        self.vae = tf.keras.models.Model(encoder_input, vae_output)
+        # self.vae = tf.keras.models.Model(encoder_input, vae_output)
+        self.vae = tf.keras.models.Model(encoder_input, [z_mean, z_log_var, vae_output])
         self.z_gan = tf.keras.models.Model(encoder_input, self.z_discriminator(z))
         self.d_gan = tf.keras.models.Model(encoder_input, self.d_discriminator(vae_output))
-        # return self.encoder, self.decoder_no_noise, self.z_discriminator, self.d_discriminator, self.vae, self.z_gan, self.d_gan
 
         # self.encoder.save('checkpoints/encoder.h5', include_optimizer=False)
         # self.decoder.save('checkpoints/decoder.h5', include_optimizer=False)
@@ -73,11 +72,11 @@ class Model:
     def build_encoder(self):
         encoder_input = tf.keras.layers.Input(shape=self.input_shape)
         x = encoder_input
-        x = self.conv2d(x, 16,  3, 2, 'leaky')
-        x = self.conv2d(x, 32,  3, 2, 'leaky')
-        x = self.conv2d(x, 64,  3, 2, 'leaky')
-        x = self.conv2d(x, 128, 3, 2, 'leaky')
-        x = self.conv2d(x, 256, 3, 2, 'leaky')
+        x = self.conv2d(x, 16,  3, 2, 'relu')
+        x = self.conv2d(x, 32,  3, 2, 'relu')
+        x = self.conv2d(x, 64,  3, 2, 'relu')
+        x = self.conv2d(x, 128, 3, 2, 'relu')
+        x = self.conv2d(x, 256, 3, 2, 'relu')
         x = self.flatten(x)
         z_mean = self.dense(x, self.latent_dim, 'linear')
         z_log_var = self.dense(x, self.latent_dim, 'linear')
@@ -139,7 +138,7 @@ class Model:
             return f
         return tf.keras.layers.Lambda(function=function)(x)
 
-    def conv2d(self, x, filters, kernel_size, strides=1, bn=False, activation='relu', alpha=0.2):
+    def conv2d(self, x, filters, kernel_size, strides=1, bn=True, activation='relu', alpha=0.2):
         x = tf.keras.layers.Conv2D(
             strides=strides,
             filters=filters,
@@ -151,7 +150,7 @@ class Model:
             x = tf.keras.layers.BatchNormalization()(x)
         return self.activation(x, activation)
 
-    def conv2d_transpose(self, x, filters, kernel_size, strides=1, bn=False, activation='relu', alpha=0.2):
+    def conv2d_transpose(self, x, filters, kernel_size, strides=1, bn=True, activation='relu', alpha=0.2):
         x = tf.keras.layers.Conv2DTranspose(
             strides=strides,
             filters=filters,
@@ -163,7 +162,7 @@ class Model:
             x = tf.keras.layers.BatchNormalization()(x)
         return self.activation(x, activation)
 
-    def dense(self, x, units, bn=False, activation='relu', alpha=0.2):
+    def dense(self, x, units, bn=True, activation='relu', alpha=0.2):
         x = tf.keras.layers.Dense(
             units=units,
             use_bias=False if bn else True,
