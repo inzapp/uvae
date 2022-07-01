@@ -154,14 +154,16 @@ class UniformVectorizedAutoEncoder:
             return min_val + K.softplus(tensor - min_val)
 
         def gaussian_nll(x, mu, log_sigma):
-            return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 + K.log(np.pi * 2.0)
-            # return 0.5 * ((x - mu) / tf.exp(log_sigma)) ** 2 + log_sigma + 0.5 * np.log(2 * np.pi)
+            return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 + K.log(np.pi * 2.0)  # positive loss
+            # return 0.5 * ((x - mu) / tf.exp(log_sigma)) ** 2 + log_sigma + 0.5 * np.log(2 * np.pi)  # negative loss
+            # return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 * K.log(np.pi * 2.0)  # negetive loss
 
         with tf.GradientTape() as tape:
             batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
             y_pred = model(x, training=True)
-            # log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred), axis=[0, 1, 2, 3], keepdims=True)))
-            log_sigma = K.log(tf.sqrt(tf.reduce_mean((y_true - y_pred) ** 2, [0, 1, 2, 3], keepdims=True)))
+            log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred), axis=[0, 1, 2, 3], keepdims=True)))
+            # log_sigma = K.log(tf.sqrt(tf.reduce_mean((y_true - y_pred) ** 2, [0, 1, 2, 3], keepdims=True)))
+            # log_sigma = tf.zeros_like(x)
             log_sigma = softclip(log_sigma, -6.0)
             loss = gaussian_nll(x, y_pred, log_sigma)
             # loss = tf.reduce_sum(loss) / batch_size
@@ -194,21 +196,21 @@ class UniformVectorizedAutoEncoder:
 
     def train(self):
         iteration_count = 0
-        optimizer_e =     tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_e2 =    tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_vae =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_e =     tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_e2 =    tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_vae =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
 
-        # optimizer_e =     tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_e2 =    tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_z_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_d_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_vae =   tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_z_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_d_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_e =     tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_e2 =    tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_z_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_d_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_vae =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_z_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_d_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
 
         train_step_e = tf.function(self.train_step_e)
         train_step_e2 = tf.function(self.train_step_e2)
@@ -222,7 +224,7 @@ class UniformVectorizedAutoEncoder:
         var = tf.constant(var, dtype=tf.dtypes.float32)
         std = tf.constant(std, dtype=tf.dtypes.float32)
         os.makedirs(self.checkpoint_path, exist_ok=True)
-        scale = float(self.input_shape[0] + self.input_shape[1])
+        scale = float(self.input_shape[0] * self.input_shape[1])
         while True:
             # for ex, z_dx, z_dy, d_dx, d_dy, z_gan_y, d_gan_x, d_gan_y in self.train_data_generator:
             for ex in self.train_data_generator:

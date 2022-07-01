@@ -94,11 +94,11 @@ class Model:
         # x = self.noise_layer(x)
         x = self.dense(x, target_rows * target_cols * target_channels)
         x = self.reshape(x, (target_rows, target_cols, target_channels))
-        x = self.conv2d_transpose(x, 256, 3, 2, 'leaky')
-        x = self.conv2d_transpose(x, 128, 3, 2, 'leaky')
-        x = self.conv2d_transpose(x, 64,  3, 2, 'leaky')
-        x = self.conv2d_transpose(x, 32,  3, 2, 'leaky')
-        x = self.conv2d_transpose(x, 16,  3, 2, 'leaky')
+        x = self.conv2d_transpose(x, 256, 3, 2, 'relu')
+        x = self.conv2d_transpose(x, 128, 3, 2, 'relu')
+        x = self.conv2d_transpose(x, 64,  3, 2, 'relu')
+        x = self.conv2d_transpose(x, 32,  3, 2, 'relu')
+        x = self.conv2d_transpose(x, 16,  3, 2, 'relu')
         decoder_output = self.conv2d_transpose(x, self.input_shape[-1], 1, 1, 'sigmoid')
         return decoder_input, decoder_output
 
@@ -113,11 +113,11 @@ class Model:
     def build_d_discriminator(self):
         d_discriminator_input = tf.keras.layers.Input(shape=self.input_shape)
         x = d_discriminator_input
-        x = self.conv2d(x, 16,  3, 2, 'leaky')
-        x = self.conv2d(x, 32,  3, 2, 'leaky')
-        x = self.conv2d(x, 64,  3, 2, 'leaky')
-        x = self.conv2d(x, 128, 3, 2, 'leaky')
-        x = self.conv2d(x, 256, 3, 2, 'leaky')
+        x = self.conv2d(x, 16,  3, 2, 'relu')
+        x = self.conv2d(x, 32,  3, 2, 'relu')
+        x = self.conv2d(x, 64,  3, 2, 'relu')
+        x = self.conv2d(x, 128, 3, 2, 'relu')
+        x = self.conv2d(x, 256, 3, 2, 'relu')
         x = self.conv2d(x, 1, 1, 1, 'linear')
         d_discriminator_output = self.gap(x)
         return d_discriminator_input, d_discriminator_output
@@ -139,7 +139,7 @@ class Model:
             return f
         return tf.keras.layers.Lambda(function=function)(x)
 
-    def conv2d(self, x, filters, kernel_size, strides=1, bn=True, activation='relu', alpha=0.2):
+    def conv2d(self, x, filters, kernel_size, strides=1, bn=False, activation='relu', alpha=0.2):
         x = tf.keras.layers.Conv2D(
             strides=strides,
             filters=filters,
@@ -151,7 +151,7 @@ class Model:
             x = tf.keras.layers.BatchNormalization()(x)
         return self.activation(x, activation)
 
-    def conv2d_transpose(self, x, filters, kernel_size, strides=1, bn=True, activation='relu', alpha=0.2):
+    def conv2d_transpose(self, x, filters, kernel_size, strides=1, bn=False, activation='relu', alpha=0.2):
         x = tf.keras.layers.Conv2DTranspose(
             strides=strides,
             filters=filters,
@@ -163,7 +163,7 @@ class Model:
             x = tf.keras.layers.BatchNormalization()(x)
         return self.activation(x, activation)
 
-    def dense(self, x, units, bn=True, activation='relu', alpha=0.2):
+    def dense(self, x, units, bn=False, activation='relu', alpha=0.2):
         x = tf.keras.layers.Dense(
             units=units,
             use_bias=False if bn else True,
