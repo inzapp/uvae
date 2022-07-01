@@ -102,7 +102,7 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
             z = z * 2.0 - 1.0
         if add_noise:
             z *= np.random.normal(loc=0.0, scale=1.0, size=size)
-        z = np.clip(z, -1.0, 1.0)
+        # z = np.clip(z, -1.0, 1.0)
         return z
 
     def next_image_path(self):
