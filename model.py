@@ -73,11 +73,11 @@ class Model:
     def build_encoder(self):
         encoder_input = tf.keras.layers.Input(shape=self.input_shape)
         x = encoder_input
-        x = self.conv2d(x, 16,  3, 2, 'tanh')
-        x = self.conv2d(x, 32,  3, 2, 'tanh')
-        x = self.conv2d(x, 64,  3, 2, 'tanh')
-        x = self.conv2d(x, 128, 3, 2, 'tanh')
-        x = self.conv2d(x, 256, 3, 2, 'tanh')
+        x = self.conv2d(x, 16,  3, 2, 'relu')
+        x = self.conv2d(x, 32,  3, 2, 'relu')
+        x = self.conv2d(x, 64,  3, 2, 'relu')
+        x = self.conv2d(x, 128, 3, 2, 'relu')
+        x = self.conv2d(x, 256, 3, 2, 'relu')
         x = self.flatten(x)
         z_mean = self.dense(x, self.latent_dim, 'linear')
         z_log_var = self.dense(x, self.latent_dim, 'linear')
@@ -94,11 +94,11 @@ class Model:
         # x = self.noise_layer(x)
         x = self.dense(x, target_rows * target_cols * target_channels)
         x = self.reshape(x, (target_rows, target_cols, target_channels))
-        x = self.conv2d_transpose(x, 256, 3, 2, 'tanh')
-        x = self.conv2d_transpose(x, 128, 3, 2, 'tanh')
-        x = self.conv2d_transpose(x, 64,  3, 2, 'tanh')
-        x = self.conv2d_transpose(x, 32,  3, 2, 'tanh')
-        x = self.conv2d_transpose(x, 16,  3, 2, 'tanh')
+        x = self.conv2d_transpose(x, 256, 3, 2, 'relu')
+        x = self.conv2d_transpose(x, 128, 3, 2, 'relu')
+        x = self.conv2d_transpose(x, 64,  3, 2, 'relu')
+        x = self.conv2d_transpose(x, 32,  3, 2, 'relu')
+        x = self.conv2d_transpose(x, 16,  3, 2, 'relu')
         decoder_output = self.conv2d_transpose(x, self.input_shape[-1], 1, 1, 'tanh')
         return decoder_input, decoder_output
 
