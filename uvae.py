@@ -106,6 +106,7 @@ class UniformVectorizedAutoEncoder:
     def graph_forward(self, model, x):
         return model(x, training=False)
 
+
     def train_step_e2(self, model, optimizer, x, mean, var, std):
         with tf.GradientTape() as tape:
             z_mean, z_log_var, z = model(x, training=True)
@@ -117,24 +118,48 @@ class UniformVectorizedAutoEncoder:
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss
 
-    def train_step_e(self, model, optimizer, x, scale=1000.0):
+    def train_step_e(self, model, optimizer, x, scale=1.0):
         with tf.GradientTape() as tape:
+            batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
             z_mean, z_log_var, z = model(x, training=True)
-            loss = -0.5 * (1.0 + z_log_var - K.square(z_mean) - K.exp(z_log_var)) * (1.0 / scale)
+            # loss = -0.5 * (1.0 + z_log_var - K.square(z_mean) - K.exp(z_log_var)) * (1.0 / scale)
+            loss = -0.5 * (1.0 + z_log_var - K.square(z_mean) - K.exp(z_log_var))
+            loss = tf.reduce_sum(loss) / batch_size
             # loss = tf.reduce_sum(loss, axis=1)
-            loss = tf.reduce_mean(loss)
+            # loss = tf.reduce_mean(loss)
+            # loss = tf.reduce_sum(loss) / batch_size
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss * scale
 
-    def train_step(self, model, optimizer, batch_x, y_true):
+    # def train_step(self, model, optimizer, x, y_true):
+    #     with tf.GradientTape() as tape:
+    #         batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
+    #         y_pred = model(x, training=True)
+    #         loss = K.square(y_true - y_pred)
+    #         loss = tf.reduce_sum(loss) / batch_size
+    #         # loss = tf.reduce_mean(loss)
+    #         # loss = tf.reduce_mean(loss, axis=0)
+    #         # weight = K.cast(K.prod(K.shape(loss)), dtype=tf.float32)
+    #         # loss = tf.reduce_sum(loss)
+    #     gradients = tape.gradient(loss, model.trainable_variables)
+    #     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    #     return loss
+
+    def train_step(self, model, optimizer, x, y_true):
+        def softclip(tensor, min_val):
+            """ Clips the tensor values at the minimum value min in a softway. Taken from Handful of Trials """
+            return min_val + K.softplus(tensor - min_val)
+        def gaussian_nll(x, mu, log_sigma):
+            pi = 3.1415926535897932384626433832795
+            return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 + K.log(pi * 2.0)
         with tf.GradientTape() as tape:
-            y_pred = model(batch_x, training=True)
-            loss = K.square(y_true - y_pred)
-            loss = tf.reduce_mean(loss)
-            # loss = tf.reduce_mean(loss, axis=0)
-            # weight = K.cast(K.prod(K.shape(loss)), dtype=tf.float32)
-            # loss = tf.reduce_sum(loss)
+            batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
+            y_pred = model(x, training=True)
+            log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred), keepdims=True)))
+            log_sigma = softclip(log_sigma, -6.0)
+            loss = gaussian_nll(x, y_pred, log_sigma)
+            loss = tf.reduce_sum(loss) / batch_size
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss
@@ -198,7 +223,7 @@ class UniformVectorizedAutoEncoder:
                 distribution_loss = 0.0
                 kl_loss = 0.0
                 # distribution_loss = self.train_step_e2(self.encoder, optimizer_e, ex, mean, var, std)
-                if iteration_count > 1000:
+                if iteration_count > 2000:
                     kl_loss = self.train_step_e(self.encoder, optimizer_e, ex)
                 reconstruction_loss = train_step_vae(self.vae, optimizer_vae, ex, ex)
 
@@ -257,7 +282,8 @@ class UniformVectorizedAutoEncoder:
         z = np.asarray([UVAEDataGenerator.get_z_vector(size=self.latent_dim) for _ in range(size)]).astype('float32')
         # z = np.zeros(shape=((size, self.latent_dim)), dtype=np.float32)
         y = self.graph_forward(self.decoder, z)
-        y = (y * 127.5) + 127.5
+        # y = (y * 127.5) + 127.5
+        y *= 255.0
         generated_images = np.clip(np.asarray(y).reshape((size,) + self.input_shape), 0.0, 255.0).astype('uint8')
         return generated_images[0] if size == 1 else generated_images
 
@@ -271,21 +297,24 @@ class UniformVectorizedAutoEncoder:
                 z.append([space[i], space[j]])
         z = np.asarray(z).reshape((split_size * split_size, 2)).astype('float32')
         y = self.graph_forward(self.decoder, z)
-        y = (y * 127.5) + 127.5
+        # y = (y * 127.5) + 127.5
+        y *= 255.0
         generated_images = np.clip(np.asarray(y).reshape((split_size * split_size,) + self.input_shape), 0.0, 255.0).astype('uint8')
         return generated_images
 
     def predict(self, img):
         img = self.resize(img, (self.input_shape[1], self.input_shape[0]))
         x = np.asarray(img).reshape((1,) + self.input_shape).astype('float32')
-        x = (x - 127.5) / 127.5
+        # x = (x - 127.5) / 127.5
+        x /= 255.0
         _, _, z = self.graph_forward(self.encoder, x)
         z = np.asarray(z).reshape(-1)
         # with np.printoptions(precision=2, suppress=True):
         #     print(f'z : {z[0]}')
         y = self.graph_forward(self.vae, x)
         y = np.asarray(y).reshape(self.input_shape)
-        y = (y * 127.5) + 127.5
+        # y = (y * 127.5) + 127.5
+        y = y * 255.0
         decoded_img = np.clip(y, 0.0, 255.0).astype('uint8')
         return img, decoded_img, z
 
@@ -318,7 +347,8 @@ class UniformVectorizedAutoEncoder:
         for val in space:
             z = np.zeros(shape=(1, self.latent_dim), dtype=np.float32) + val
             y = np.asarray(self.graph_forward(self.decoder, z))
-            y = (y * 127.5) + 127.5
+            # y = (y * 127.5) + 127.5
+            y *= 255.0
             generated_image = np.clip(np.asarray(y).reshape(self.input_shape), 0.0, 255.0).astype('uint8')
             cv2.imshow('interpolation', generated_image)
             key = cv2.waitKey(10)

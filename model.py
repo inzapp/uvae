@@ -99,7 +99,7 @@ class Model:
         x = self.conv2d_transpose(x, 64,  3, 2, 'relu')
         x = self.conv2d_transpose(x, 32,  3, 2, 'relu')
         x = self.conv2d_transpose(x, 16,  3, 2, 'relu')
-        decoder_output = self.conv2d_transpose(x, self.input_shape[-1], 1, 1, 'tanh')
+        decoder_output = self.conv2d_transpose(x, self.input_shape[-1], 1, 1, 'sigmoid')
         return decoder_input, decoder_output
 
     def build_z_discriminator(self):
