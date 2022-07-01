@@ -106,36 +106,38 @@ class UniformVectorizedAutoEncoder:
     def graph_forward(self, model, x):
         return model(x, training=False)
 
-    # def train_step_e(self, model, optimizer, x, mean, var, std):
-    #     with tf.GradientTape() as tape:
-    #         y_pred = model(x, training=True)
-    #         loss_mean = K.square(mean - tf.reduce_mean(y_pred))
-    #         loss_var = K.square(var - tf.math.reduce_variance(y_pred))
-    #         loss_std = K.square(std - tf.math.reduce_std(y_pred))
-    #         loss = (loss_mean + loss_var + loss_std) / 3.0
-    #     gradients = tape.gradient(loss, model.trainable_variables)
-    #     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-    #     return loss
-
-    def train_step_e(self, model, optimizer, x):
+    def train_step_e2(self, model, optimizer, x, mean, var, std):
         with tf.GradientTape() as tape:
             z_mean, z_log_var, z = model(x, training=True)
-            loss = -0.5 * (1.0 + z_log_var - K.square(z_mean) - K.exp(z_log_var))
-            loss = tf.reduce_sum(loss, axis=1)
-            loss = tf.reduce_mean(loss)
+            loss_mean = K.square(mean - tf.reduce_mean(z))
+            loss_var = K.square(var - tf.math.reduce_variance(z))
+            loss_std = K.square(std - tf.math.reduce_std(z))
+            loss = (loss_mean + loss_var + loss_std) / 3.0
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss
+
+    def train_step_e(self, model, optimizer, x, scale=1000.0):
+        with tf.GradientTape() as tape:
+            z_mean, z_log_var, z = model(x, training=True)
+            loss = -0.5 * (1.0 + z_log_var - K.square(z_mean) - K.exp(z_log_var)) * (1.0 / scale)
+            # loss = tf.reduce_sum(loss, axis=1)
+            loss = tf.reduce_mean(loss)
+        gradients = tape.gradient(loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+        return loss * scale
 
     def train_step(self, model, optimizer, batch_x, y_true):
         with tf.GradientTape() as tape:
             y_pred = model(batch_x, training=True)
             loss = K.square(y_true - y_pred)
-            loss = tf.reduce_mean(loss, axis=0)
-            mean_loss = tf.reduce_mean(loss)
+            loss = tf.reduce_mean(loss)
+            # loss = tf.reduce_mean(loss, axis=0)
+            # weight = K.cast(K.prod(K.shape(loss)), dtype=tf.float32)
+            # loss = tf.reduce_sum(loss)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-        return mean_loss
+        return loss
 
     def evaluate(self, generator):
         loss_sum = 0.0
@@ -162,13 +164,23 @@ class UniformVectorizedAutoEncoder:
     def train(self):
         iteration_count = 0
         optimizer_e =     tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
+        optimizer_e2 =    tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
         optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
         optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
         optimizer_vae =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
         optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
         optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
 
+        # optimizer_e =     tf.keras.optimizers.RMSprop(lr=self.lr)
+        # optimizer_e2 =    tf.keras.optimizers.RMSprop(lr=self.lr)
+        # optimizer_z_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        # optimizer_d_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        # optimizer_vae =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        # optimizer_z_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
+        # optimizer_d_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
+
         train_step_e = tf.function(self.train_step_e)
+        train_step_e2 = tf.function(self.train_step_e2)
         train_step_z_d = tf.function(self.train_step)
         train_step_d_d = tf.function(self.train_step)
         train_step_vae = tf.function(self.train_step)
@@ -184,7 +196,10 @@ class UniformVectorizedAutoEncoder:
             for ex in self.train_data_generator:
                 iteration_count += 1
                 distribution_loss = 0.0
-                distribution_loss = self.train_step_e(self.encoder, optimizer_e, ex)
+                kl_loss = 0.0
+                # distribution_loss = self.train_step_e2(self.encoder, optimizer_e, ex, mean, var, std)
+                if iteration_count > 1000:
+                    kl_loss = self.train_step_e(self.encoder, optimizer_e, ex)
                 reconstruction_loss = train_step_vae(self.vae, optimizer_vae, ex, ex)
 
                 z_discriminator_loss = 0.0
@@ -201,7 +216,8 @@ class UniformVectorizedAutoEncoder:
                 # self.d_discriminator.trainable = False
                 # d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, d_gan_y)
 
-                print(f'\r[iteration count : {iteration_count:6d}] reconstruction_loss => {reconstruction_loss:.4f}, distribution_loss => {distribution_loss:.4f}, z_discriminator_loss => {z_discriminator_loss:.4f}, z_adversarial_loss => {z_adversarial_loss:.4f}, d_discriminator_loss => {d_discriminator_loss:.4f}, d_adversarial_loss => {d_adversarial_loss:.4f}', end='\t')
+                # print(f'\r[iteration count : {iteration_count:6d}] reconstruction_loss => {reconstruction_loss:.4f}, distribution_loss => {distribution_loss:.4f}, z_discriminator_loss => {z_discriminator_loss:.4f}, z_adversarial_loss => {z_adversarial_loss:.4f}, d_discriminator_loss => {d_discriminator_loss:.4f}, d_adversarial_loss => {d_adversarial_loss:.4f}', end='\t')
+                print(f'\r[iteration count : {iteration_count:6d}] reconstruction_loss => {reconstruction_loss:.4f}, distribution_loss => {distribution_loss:.4f}, kl_loss => {kl_loss:.4f}', end='\t')
                 if self.training_view:
                     self.training_view_function()
                 if iteration_count % 5000 == 0:
@@ -263,7 +279,8 @@ class UniformVectorizedAutoEncoder:
         img = self.resize(img, (self.input_shape[1], self.input_shape[0]))
         x = np.asarray(img).reshape((1,) + self.input_shape).astype('float32')
         x = (x - 127.5) / 127.5
-        z = np.asarray(self.graph_forward(self.encoder, x)).reshape(-1)
+        _, _, z = self.graph_forward(self.encoder, x)
+        z = np.asarray(z).reshape(-1)
         # with np.printoptions(precision=2, suppress=True):
         #     print(f'z : {z[0]}')
         y = self.graph_forward(self.vae, x)
