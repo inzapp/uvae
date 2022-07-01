@@ -55,7 +55,7 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         ex = np.asarray(ex).reshape((self.batch_size,) + self.input_shape).astype('float32')
         ex = (ex - 127.5) / 127.5
         # half_ex = ex[:self.half_batch_size]
-        # half_z_real = np.asarray(self.graph_forward(self.encoder, half_ex)).astype('float32')
+        # half_z_real = np.asarray(self.graph_forward(self.encoder, half_ex)[2]).astype('float32')
         # half_z_fake = np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
         # half_z_fake2 = np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
 
