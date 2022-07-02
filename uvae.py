@@ -125,36 +125,20 @@ class UniformVectorizedAutoEncoder:
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss
 
-    # def train_step(self, model, optimizer, x, y_true):
-    #     with tf.GradientTape() as tape:
-    #         batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
-    #         y_pred = model(x, training=True)
-    #         loss = K.square(y_true - y_pred)
-    #         loss = tf.reduce_sum(loss) / batch_size
-    #         # loss = tf.reduce_mean(loss)
-    #         # loss = tf.reduce_mean(loss, axis=0)
-    #         # weight = K.cast(K.prod(K.shape(loss)), dtype=tf.float32)
-    #         # loss = tf.reduce_sum(loss)
-    #     gradients = tape.gradient(loss, model.trainable_variables)
-    #     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-    #     return loss
-
-    # def train_step(self, model, optimizer, x, y_true, kl_weight):
-    #     def softclip(tensor, min_val):
-    #         return min_val + K.softplus(tensor - min_val)
-    #     def gaussian_nll(mu, log_sigma, x):
-    #         return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 * K.log(np.pi * 2.0)
-    #     with tf.GradientTape() as tape:
-    #         batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
-    #         mu, log_var, y_pred = model(x, training=True)
-    #         log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred))))
-    #         log_sigma = softclip(log_sigma, -6.0)
-    #         reconstruction_loss = tf.reduce_sum(gaussian_nll(y_pred, log_sigma, y_true)) / batch_size
-    #         kl_loss = tf.reduce_sum(-0.5 * (1.0 + log_var - K.square(mu) - K.exp(log_var))) / batch_size * kl_weight
-    #         loss = reconstruction_loss + kl_loss
-    #     gradients = tape.gradient(loss, model.trainable_variables)
-    #     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-    #     return reconstruction_loss, kl_loss, log_sigma
+    def train_step_vae(self, model, optimizer, x, y_true):
+        def softclip(tensor, min_val):
+            return min_val + K.softplus(tensor - min_val)
+        def gaussian_nll(mu, log_sigma, x):
+            return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 * K.log(np.pi * 2.0)
+        with tf.GradientTape() as tape:
+            batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
+            y_pred = model(x, training=True)
+            log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred))))
+            log_sigma = softclip(log_sigma, -6.0)
+            loss = tf.reduce_sum(gaussian_nll(y_pred, log_sigma, y_true)) / batch_size
+        gradients = tape.gradient(loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+        return loss
 
     # def evaluate(self, generator):
     #     loss_sum = 0.0
@@ -182,11 +166,11 @@ class UniformVectorizedAutoEncoder:
     def train(self):
         iteration_count = 0
         optimizer_e =     tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
-        optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
-        optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
+        optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.2, beta_1=0.5)
+        optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.2, beta_1=0.5)
         optimizer_vae =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
-        optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
-        optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
+        optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.2, beta_1=0.5)
+        optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.2, beta_1=0.5)
 
         # optimizer_e =     tf.keras.optimizers.RMSprop(lr=self.lr)
         # optimizer_z_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
@@ -198,6 +182,7 @@ class UniformVectorizedAutoEncoder:
         train_step_z_d = tf.function(self.train_step_mse)
         train_step_d_d = tf.function(self.train_step_mse)
         train_step_vae = tf.function(self.train_step_mse)
+        # train_step_vae = tf.function(self.train_step_vae)
         train_step_z_gan = tf.function(self.train_step_mse)
         train_step_d_gan = tf.function(self.train_step_mse)
         mean, var, std = self.calculate_mean_var_std(latent_dim=self.latent_dim)
