@@ -77,7 +77,7 @@ class Model:
         x = self.conv2d(x, 128, 3, 2, activation='relu')
         x = self.conv2d(x, 256, 3, 2, activation='relu')
         x = self.flatten(x)
-        encoder_output = self.dense(x, self.latent_dim, activation='linear')
+        encoder_output = self.dense(x, self.latent_dim, activation='tanh')
         return encoder_input, encoder_output
 
     def build_decoder(self):
