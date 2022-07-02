@@ -106,7 +106,8 @@ class UniformVectorizedAutoEncoder:
     def graph_forward(self, model, x):
         return model(x, training=False)
 
-    def train_step_e2(self, model, optimizer, x, mean, var, std):
+    @tf.function
+    def train_step_distribution(self, model, optimizer, x, mean, var, std):
         with tf.GradientTape() as tape:
             mu, log_var, z = model(x, training=True)
             loss_mean = K.square(mean - tf.reduce_mean(z))
@@ -147,28 +148,33 @@ class UniformVectorizedAutoEncoder:
     #     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
     #     return loss
 
-    def train_step(self, model, optimizer, x, y_true, scale):
-        def softclip(tensor, min_val):
-            return min_val + K.softplus(tensor - min_val)
+    # def train_step(self, model, optimizer, x, y_true, kl_weight):
+    #     def softclip(tensor, min_val):
+    #         return min_val + K.softplus(tensor - min_val)
+    #     def gaussian_nll(mu, log_sigma, x):
+    #         return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 * K.log(np.pi * 2.0)
+    #     with tf.GradientTape() as tape:
+    #         batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
+    #         mu, log_var, y_pred = model(x, training=True)
+    #         log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred))))
+    #         log_sigma = softclip(log_sigma, -6.0)
+    #         reconstruction_loss = tf.reduce_sum(gaussian_nll(y_pred, log_sigma, y_true)) / batch_size
+    #         kl_loss = tf.reduce_sum(-0.5 * (1.0 + log_var - K.square(mu) - K.exp(log_var))) / batch_size * kl_weight
+    #         loss = reconstruction_loss + kl_loss
+    #     gradients = tape.gradient(loss, model.trainable_variables)
+    #     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    #     return reconstruction_loss, kl_loss, log_sigma
 
-        def gaussian_nll(mu, log_sigma, x):
-            # return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 + K.log(np.pi * 2.0)
-            return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 * K.log(np.pi * 2.0)
-
+    def train_step(self, model, optimizer, x, y_true, kl_weight):
         with tf.GradientTape() as tape:
             batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
             mu, log_var, y_pred = model(x, training=True)
-            log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred))))
-            log_sigma = softclip(log_sigma, -6.0)
-            reconstruction_loss = tf.reduce_sum(gaussian_nll(y_pred, log_sigma, y_true)) / batch_size
-
-            kl_loss = tf.reduce_sum(-0.5 * (1.0 + log_var - K.square(mu) - K.exp(log_var))) / batch_size
-
+            reconstruction_loss = tf.reduce_sum(K.square(y_true - y_pred)) / batch_size
+            kl_loss = -0.5 * tf.reduce_sum((1.0 + log_var - K.square(mu) - K.exp(log_var))) / batch_size * kl_weight
             loss = reconstruction_loss + kl_loss
-            # loss = loss / scale
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-        return reconstruction_loss, kl_loss, log_sigma
+        return reconstruction_loss, kl_loss, 0.0
 
     def evaluate(self, generator):
         loss_sum = 0.0
@@ -192,26 +198,30 @@ class UniformVectorizedAutoEncoder:
         print(f'mean, variance, std: {mean:.4f}, {var:.4f}, {std:.4f}\n')
         return mean, var, std
 
+    def get_kl_weight(self, iteration_count, burn_in=1000):
+        if iteration_count < burn_in:
+            return 0.0
+        iteration_count -= burn_in
+        return pow(iteration_count / burn_in, 4) if iteration_count < burn_in else 1.0
+
     def train(self):
         iteration_count = 0
-        optimizer_e =     tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_e2 =    tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_vae =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
-        optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_e =     tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_e2 =    tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_vae =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
+        # optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.9)
 
-        # optimizer_e =     tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_e2 =    tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_z_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_d_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_vae =   tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_z_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
-        # optimizer_d_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_e =     tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_e2 =    tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_z_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_d_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_vae =   tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_z_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
+        optimizer_d_gan = tf.keras.optimizers.RMSprop(lr=self.lr)
 
-        train_step_e = tf.function(self.train_step_e)
-        train_step_e2 = tf.function(self.train_step_e2)
         train_step_z_d = tf.function(self.train_step)
         train_step_d_d = tf.function(self.train_step)
         train_step_vae = tf.function(self.train_step)
@@ -222,17 +232,14 @@ class UniformVectorizedAutoEncoder:
         var = tf.constant(var, dtype=tf.dtypes.float32)
         std = tf.constant(std, dtype=tf.dtypes.float32)
         os.makedirs(self.checkpoint_path, exist_ok=True)
-        scale = float(self.input_shape[0] * self.input_shape[1])
         while True:
             # for ex, z_dx, z_dy, d_dx, d_dy, z_gan_y, d_gan_x, d_gan_y in self.train_data_generator:
             for ex in self.train_data_generator:
                 iteration_count += 1
                 distribution_loss = 0.0
                 kl_loss = 0.0
-                # distribution_loss = self.train_step_e2(self.encoder, optimizer_e, ex, mean, var, std)
-                # if iteration_count > 2000:
-                # kl_loss = self.train_step_e(self.encoder, optimizer_e, ex, scale)
-                reconstruction_loss, kl_loss, log_sigma = train_step_vae(self.vae, optimizer_vae, ex, ex, scale)
+                # distribution_loss = self.train_step_distribution(self.encoder, optimizer_e, ex, mean, var, std)
+                reconstruction_loss, kl_loss, log_sigma = train_step_vae(self.vae, optimizer_vae, ex, ex, tf.constant(self.get_kl_weight(iteration_count)))
 
                 z_discriminator_loss = 0.0
                 z_adversarial_loss = 0.0
