@@ -41,9 +41,9 @@ class Model:
     def build(self):
         assert self.input_shape[0] % 32 == 0
         assert self.input_shape[1] % 32 == 0
-        encoder_input, z_mean, z_log_var, z = self.build_encoder()
+        encoder_input, mu, log_var, z = self.build_encoder()
         decoder_input, decoder_output = self.build_decoder()
-        self.encoder = tf.keras.models.Model(encoder_input, [z_mean, z_log_var, z])
+        self.encoder = tf.keras.models.Model(encoder_input, [mu, log_var, z])
         self.decoder = tf.keras.models.Model(decoder_input, decoder_output)
         z_discriminator_input, z_discriminator_output = self.build_z_discriminator()
         d_discriminator_input, d_discriminator_output = self.build_d_discriminator()
@@ -51,7 +51,7 @@ class Model:
         self.d_discriminator = tf.keras.models.Model(d_discriminator_input, d_discriminator_output)
         vae_output = self.decoder(z)
         # self.vae = tf.keras.models.Model(encoder_input, vae_output)
-        self.vae = tf.keras.models.Model(encoder_input, [z_mean, z_log_var, vae_output])
+        self.vae = tf.keras.models.Model(encoder_input, [mu, log_var, vae_output])
         self.z_gan = tf.keras.models.Model(encoder_input, self.z_discriminator(z))
         self.d_gan = tf.keras.models.Model(encoder_input, self.d_discriminator(vae_output))
 
@@ -78,10 +78,10 @@ class Model:
         x = self.conv2d(x, 128, 3, 2, 'relu')
         x = self.conv2d(x, 256, 3, 2, 'relu')
         x = self.flatten(x)
-        z_mean = self.dense(x, self.latent_dim, 'linear')
-        z_log_var = self.dense(x, self.latent_dim, 'linear')
-        z = self.sampling(z_mean, z_log_var)
-        return encoder_input, z_mean, z_log_var, z
+        mu = self.dense(x, self.latent_dim, 'linear')
+        log_var = self.dense(x, self.latent_dim, 'linear')
+        z = self.sampling(mu, log_var)
+        return encoder_input, mu, log_var, z
 
     def build_decoder(self):
         target_rows = self.input_shape[0] // 32
@@ -121,12 +121,12 @@ class Model:
         d_discriminator_output = self.gap(x)
         return d_discriminator_input, d_discriminator_output
 
-    def sampling(self, z_mean, z_log_var):
+    def sampling(self, mu, log_var):
         def function(args):
-            z_mean, log_var = args
-            epsilon = K.random_normal(shape=K.shape(z_mean), mean=0.0, stddev=1.0)
-            return z_mean + K.exp(log_var * 0.5) * epsilon
-        return tf.keras.layers.Lambda(function=function)([z_mean, z_log_var])
+            mu, log_var = args
+            epsilon = K.random_normal(shape=K.shape(mu), mean=0.0, stddev=1.0)
+            return mu + K.exp(log_var * 0.5) * epsilon
+        return tf.keras.layers.Lambda(function=function)([mu, log_var])
 
     def noise_layer(self, x):
         def function(f):

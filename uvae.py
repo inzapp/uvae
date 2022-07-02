@@ -108,7 +108,7 @@ class UniformVectorizedAutoEncoder:
 
     def train_step_e2(self, model, optimizer, x, mean, var, std):
         with tf.GradientTape() as tape:
-            z_mean, z_log_var, z = model(x, training=True)
+            mu, log_var, z = model(x, training=True)
             loss_mean = K.square(mean - tf.reduce_mean(z))
             loss_var = K.square(var - tf.math.reduce_variance(z))
             loss_std = K.square(std - tf.math.reduce_std(z))
@@ -120,10 +120,10 @@ class UniformVectorizedAutoEncoder:
     def train_step_e(self, model, optimizer, x, scale):
         with tf.GradientTape() as tape:
             batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
-            z_mean, z_log_var, z = model(x, training=True)
-            # loss = -0.5 * (1.0 + z_log_var - K.square(z_mean) - K.exp(z_log_var)) * (1.0 / scale)
-            loss = -0.5 * (1.0 + z_log_var - K.square(z_mean) - K.exp(z_log_var))
-            # loss = -tf.reduce_sum(0.5 * (1 + z_log_var- z_mean ** 2 - K.exp(z_log_var)))
+            mu, log_var, z = model(x, training=True)
+            # loss = -0.5 * (1.0 + log_var - K.square(mu) - K.exp(log_var)) * (1.0 / scale)
+            loss = -0.5 * (1.0 + log_var - K.square(mu) - K.exp(log_var))
+            # loss = -tf.reduce_sum(0.5 * (1 + log_var- mu ** 2 - K.exp(log_var)))
             # loss = tf.reduce_sum(loss) / batch_size
             loss = tf.reduce_sum(loss) / batch_size / scale
             # loss = tf.reduce_sum(loss, axis=1)
@@ -151,26 +151,24 @@ class UniformVectorizedAutoEncoder:
         def softclip(tensor, min_val):
             return min_val + K.softplus(tensor - min_val)
 
-        def gaussian_nll(x, mu, log_sigma):
-            return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 + K.log(np.pi * 2.0)
+        def gaussian_nll(mu, log_sigma, x):
+            # return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 + K.log(np.pi * 2.0)
+            return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 * K.log(np.pi * 2.0)
 
         with tf.GradientTape() as tape:
             batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
-            z_mean, z_log_var, y_pred = model(x, training=True)
-            log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred), axis=[0, 1, 2, 3], keepdims=True)))
+            mu, log_var, y_pred = model(x, training=True)
+            log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred))))
             log_sigma = softclip(log_sigma, -6.0)
-            reconstruction_loss = tf.reduce_sum(gaussian_nll(x, y_pred, log_sigma)) / batch_size
+            reconstruction_loss = tf.reduce_sum(gaussian_nll(y_pred, log_sigma, y_true)) / batch_size
 
-            # reconstruction_loss = tf.reduce_sum(K.square(y_true - y_pred)) / batch_size
-
-            kl_loss = tf.reduce_sum(-0.5 * (1.0 + z_log_var - K.square(z_mean) - K.exp(z_log_var))) / batch_size
-            # kl_loss = -tf.reduce_sum(0.5 * (1 + z_log_var - z_mean ** 2 - K.exp(z_log_var))) / batch_size
+            kl_loss = tf.reduce_sum(-0.5 * (1.0 + log_var - K.square(mu) - K.exp(log_var))) / batch_size
 
             loss = reconstruction_loss + kl_loss
             # loss = loss / scale
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-        return loss
+        return reconstruction_loss, kl_loss, log_sigma
 
     def evaluate(self, generator):
         loss_sum = 0.0
@@ -234,7 +232,7 @@ class UniformVectorizedAutoEncoder:
                 # distribution_loss = self.train_step_e2(self.encoder, optimizer_e, ex, mean, var, std)
                 # if iteration_count > 2000:
                 # kl_loss = self.train_step_e(self.encoder, optimizer_e, ex, scale)
-                reconstruction_loss = train_step_vae(self.vae, optimizer_vae, ex, ex, scale)
+                reconstruction_loss, kl_loss, log_sigma = train_step_vae(self.vae, optimizer_vae, ex, ex, scale)
 
                 z_discriminator_loss = 0.0
                 z_adversarial_loss = 0.0
@@ -251,7 +249,7 @@ class UniformVectorizedAutoEncoder:
                 # d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, d_gan_y)
 
                 # print(f'\r[iteration count : {iteration_count:6d}] reconstruction_loss => {reconstruction_loss:.4f}, distribution_loss => {distribution_loss:.4f}, z_discriminator_loss => {z_discriminator_loss:.4f}, z_adversarial_loss => {z_adversarial_loss:.4f}, d_discriminator_loss => {d_discriminator_loss:.4f}, d_adversarial_loss => {d_adversarial_loss:.4f}', end='\t')
-                print(f'\r[iteration count : {iteration_count:6d}] reconstruction_loss => {reconstruction_loss:.4f}, distribution_loss => {distribution_loss:.4f}, kl_loss => {kl_loss:.4f}', end='\t')
+                print(f'[iteration count : {iteration_count:6d}] reconstruction_loss => {reconstruction_loss:.4f}, kl_loss => {kl_loss:.4f}, log_sigma : {log_sigma:.4f}')
                 if self.training_view:
                     self.training_view_function()
                 if iteration_count % 5000 == 0:
