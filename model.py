@@ -27,10 +27,11 @@ os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 
 class Model:
-    def __init__(self, input_shape, latent_dim, mode='fcn'):
+    def __init__(self, input_shape, latent_dim, mode='fcn', vanilla_vae=True):
         self.input_shape = input_shape
         self.latent_dim = latent_dim
         self.mode = mode
+        self.vanilla_vae = vanilla_vae
         self.encoder = None
         self.decoder = None
         self.vae = None
@@ -48,14 +49,22 @@ class Model:
         elif self.mode == 'mlp_cnn':
             encoder_input, encoder_output = self.build_encoder_mlp_cnn()
             decoder_input, decoder_output = self.build_decoder_mlp_cnn()
-        self.encoder = tf.keras.models.Model(encoder_input, encoder_output)
-        self.decoder = tf.keras.models.Model(decoder_input, decoder_output)
+
+        if self.vanilla_vae:
+            z, mu, log_var = encoder_output
+            self.encoder = tf.keras.models.Model(encoder_input, [z, mu, log_var])
+            self.decoder = tf.keras.models.Model(decoder_input, decoder_output)
+            vae_output = self.decoder(z)
+            self.vae = tf.keras.models.Model(encoder_input, [vae_output, mu, log_var])
+        else:
+            self.encoder = tf.keras.models.Model(encoder_input, encoder_output)
+            self.decoder = tf.keras.models.Model(decoder_input, decoder_output)
+            vae_output = self.decoder(encoder_output)
+            self.vae = tf.keras.models.Model(encoder_input, vae_output)
         z_discriminator_input, z_discriminator_output = self.build_z_discriminator()
         d_discriminator_input, d_discriminator_output = self.build_d_discriminator()
         self.z_discriminator = tf.keras.models.Model(z_discriminator_input, z_discriminator_output)
         self.d_discriminator = tf.keras.models.Model(d_discriminator_input, d_discriminator_output)
-        vae_output = self.decoder(encoder_output)
-        self.vae = tf.keras.models.Model(encoder_input, vae_output)
         self.z_gan = tf.keras.models.Model(encoder_input, self.z_discriminator(encoder_output))
         self.d_gan = tf.keras.models.Model(encoder_input, self.d_discriminator(vae_output))
 
@@ -83,6 +92,11 @@ class Model:
         x = self.conv2d(x, 256, 3, 2, activation='relu')
         x = self.flatten(x)
         x = self.dense(x, 4096, activation='relu')
+        if self.vanilla_vae:
+            mu = self.dense(x, self.latent_dim, activation='linear')
+            log_var = self.dense(x, self.latent_dim, activation='linear')
+            z = self.sampling(mu, log_var)
+            return encoder_input, [z, mu, log_var]
         encoder_output = self.dense(x, self.latent_dim, activation='tanh')
         return encoder_input, encoder_output
 
@@ -111,6 +125,11 @@ class Model:
         x = self.conv2d(x, 32,  3, 2, activation='relu')
         x = self.flatten(x)
         x = self.dense(x, 4096, activation='relu')
+        if self.vanilla_vae:
+            mu = self.dense(x, self.latent_dim, activation='linear')
+            log_var = self.dense(x, self.latent_dim, activation='linear')
+            z = self.sampling(mu, log_var)
+            return mu, log_var, z
         encoder_output = self.dense(x, self.latent_dim, activation='tanh')
         return encoder_input, encoder_output
 
@@ -156,7 +175,7 @@ class Model:
             return mu + K.exp(log_var * 0.5) * epsilon
         return tf.keras.layers.Lambda(function=function)([mu, log_var])
 
-    def conv2d(self, x, filters, kernel_size, strides=1, bn=False, activation='relu', alpha=0.2):
+    def conv2d(self, x, filters, kernel_size, strides=1, bn=True, activation='relu', alpha=0.2):
         x = tf.keras.layers.Conv2D(
             strides=strides,
             filters=filters,
@@ -168,7 +187,7 @@ class Model:
             x = tf.keras.layers.BatchNormalization()(x)
         return self.activation(x, activation)
 
-    def conv2d_transpose(self, x, filters, kernel_size, strides=1, bn=False, activation='relu', alpha=0.2):
+    def conv2d_transpose(self, x, filters, kernel_size, strides=1, bn=True, activation='relu', alpha=0.2):
         x = tf.keras.layers.Conv2DTranspose(
             strides=strides,
             filters=filters,
@@ -180,7 +199,7 @@ class Model:
             x = tf.keras.layers.BatchNormalization()(x)
         return self.activation(x, activation)
 
-    def dense(self, x, units, bn=False, activation='relu', alpha=0.2):
+    def dense(self, x, units, bn=True, activation='relu', alpha=0.2):
         x = tf.keras.layers.Dense(
             units=units,
             use_bias=False if bn else True,

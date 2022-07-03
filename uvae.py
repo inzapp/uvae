@@ -119,6 +119,16 @@ class UniformVectorizedAutoEncoder:
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss
 
+    @tf.function
+    def train_step_distance(self, model, optimizer, x):
+        with tf.GradientTape() as tape:
+            half_batch_size = K.cast(K.shape(x)[0] / 2, dtype=tf.int32)
+            z = model(x, training=True)
+            loss = -tf.reduce_mean(K.square(z[half_batch_size:] - z[:half_batch_size]))
+        gradients = tape.gradient(loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+        return loss
+
     def train_step_mse(self, model, optimizer, x, y_true):
         with tf.GradientTape() as tape:
             loss = tf.reduce_mean(K.square(y_true - model(x, training=True)))
@@ -126,6 +136,7 @@ class UniformVectorizedAutoEncoder:
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss
 
+    @tf.function
     def train_step_vae(self, model, optimizer, x, y_true):
         def softclip(tensor, min_val):
             return min_val + K.softplus(tensor - min_val)
@@ -133,13 +144,15 @@ class UniformVectorizedAutoEncoder:
             return 0.5 * K.square((x - mu) / K.exp(log_sigma)) + log_sigma + 0.5 * K.log(np.pi * 2.0)
         with tf.GradientTape() as tape:
             batch_size = K.cast(K.shape(x)[0], dtype=tf.float32)
-            y_pred = model(x, training=True)
+            y_pred, mu, log_var = model(x, training=True)
             log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred))))
             log_sigma = softclip(log_sigma, -6.0)
-            loss = tf.reduce_sum(gaussian_nll(y_pred, log_sigma, y_true)) / batch_size
+            reconstruction_loss = tf.reduce_sum(gaussian_nll(y_pred, log_sigma, y_true)) / batch_size
+            kl_loss = -0.5 * tf.reduce_sum((1.0 + log_var - K.square(mu) - K.exp(log_var))) / batch_size
+            loss = reconstruction_loss + kl_loss
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-        return loss
+        return reconstruction_loss, kl_loss
 
     def calculate_mean_var_std(self, latent_dim, iteration=10000):
         mean_sum, var_sum, std_sum = 0.0, 0.0, 0.0
@@ -181,8 +194,8 @@ class UniformVectorizedAutoEncoder:
 
         train_step_z_d = tf.function(self.train_step_mse)
         train_step_d_d = tf.function(self.train_step_mse)
-        train_step_vae = tf.function(self.train_step_mse)
-        # train_step_vae = tf.function(self.train_step_vae)
+        train_step_ae = tf.function(self.train_step_mse)
+        # train_step_ae = tf.function(self.train_step_ae)
         train_step_z_gan = tf.function(self.train_step_mse)
         train_step_d_gan = tf.function(self.train_step_mse)
         mean, var, std = self.calculate_mean_var_std(latent_dim=self.latent_dim)
@@ -195,19 +208,24 @@ class UniformVectorizedAutoEncoder:
 
                 distribution_loss = 0.0
                 reconstruction_loss = 0.0
-                distribution_loss = self.train_step_distribution(self.encoder, optimizer_e, ex, mean, var, std)
-                reconstruction_loss = train_step_vae(self.vae, optimizer_vae, ex, ex)
+                distance_loss = 0.0
+                kl_loss = 0.0
+                # distribution_loss = self.train_step_distribution(self.encoder, optimizer_e, ex, mean, var, std)
+                # distance_loss = self.train_step_distance(self.encoder, optimizer_e, ex)
+                # reconstruction_loss = train_step_ae(self.vae, optimizer_vae, ex, ex)
+                reconstruction_loss, kl_loss = self.train_step_vae(self.vae, optimizer_vae, ex, ex)
 
-                z_discriminator_loss = 0.0
-                z_adversarial_loss = 0.0
-                if train_z_d:
-                    self.z_discriminator.trainable = True
-                    z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
-                self.z_discriminator.trainable = False
-                z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, fake_label)
-                z_loss_diff = self.get_z_loss_diff(z_discriminator_loss, z_adversarial_loss)
-                if z_loss_diff < 0.05:
-                    train_z_d = False
+                # z_discriminator_loss = 0.0
+                # z_adversarial_loss = 0.0
+                # z_loss_diff = 0.0
+                # if train_z_d:
+                #     self.z_discriminator.trainable = True
+                #     z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
+                # self.z_discriminator.trainable = False
+                # z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, fake_label)
+                # z_loss_diff = self.get_z_loss_diff(z_discriminator_loss, z_adversarial_loss)
+                # if z_loss_diff < 0.05:
+                #     train_z_d = False
 
                 d_adversarial_loss = 0.0
                 d_discriminator_loss = 0.0
@@ -216,7 +234,10 @@ class UniformVectorizedAutoEncoder:
                 # self.d_discriminator.trainable = False
                 # d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, d_gan_y)
 
-                print(f'[iteration count : {iteration_count:6d}] reconstruction_loss : {reconstruction_loss:.4f}, distribution_loss : {distribution_loss:.4f}, z_discriminator_loss : {z_discriminator_loss:.4f}, z_adversarial_loss : {z_adversarial_loss:.4f}, z_loss_diff : {z_loss_diff:.4f}')
+                if kl_loss > 0.0:
+                    print(f'[iteration count : {iteration_count:6d}] reconstruction_loss : {reconstruction_loss:.4f}, kl_loss : {kl_loss:.4f}')
+                else:
+                    print(f'[iteration count : {iteration_count:6d}] reconstruction_loss : {reconstruction_loss:.4f}, distribution_loss : {distribution_loss:.4f}, distance_loss : {distance_loss:.4f}, z_discriminator_loss : {z_discriminator_loss:.4f}, z_adversarial_loss : {z_adversarial_loss:.4f}, z_loss_diff : {z_loss_diff:.4f}')
                 if self.training_view:
                     self.training_view_function()
                 if iteration_count % 5000 == 0:
@@ -255,7 +276,7 @@ class UniformVectorizedAutoEncoder:
     def generate_random_image(self, size=1):
         z = np.asarray([UVAEDataGenerator.get_z_vector(size=self.latent_dim) for _ in range(size)]).astype('float32')
         # z = np.zeros(shape=((size, self.latent_dim)), dtype=np.float32)
-        y = self.graph_forward(self.decoder, z)
+        y = np.asarray(self.graph_forward(self.decoder, z))[0]
         y = UVAEDataGenerator.denormalize(y)
         generated_images = np.clip(np.asarray(y).reshape((size,) + self.input_shape), 0.0, 255.0).astype('uint8')
         return generated_images[0] if size == 1 else generated_images
@@ -269,7 +290,7 @@ class UniformVectorizedAutoEncoder:
             for j in range(split_size):
                 z.append([space[i], space[j]])
         z = np.asarray(z).reshape((split_size * split_size, 2)).astype('float32')
-        y = self.graph_forward(self.decoder, z)
+        y = np.asarray(self.graph_forward(self.decoder, z))
         y = UVAEDataGenerator.denormalize(y)
         generated_images = np.clip(np.asarray(y).reshape((split_size * split_size,) + self.input_shape), 0.0, 255.0).astype('uint8')
         return generated_images
@@ -278,8 +299,8 @@ class UniformVectorizedAutoEncoder:
         img = self.resize(img, (self.input_shape[1], self.input_shape[0]))
         x = np.asarray(img).reshape((1,) + self.input_shape).astype('float32')
         x = UVAEDataGenerator.normalize(x)
-        z = np.asarray(self.graph_forward(self.encoder, x)).reshape(-1)
-        y = np.asarray(self.graph_forward(self.decoder, z.reshape(1, self.latent_dim))).reshape(self.input_shape)
+        z = np.asarray(self.graph_forward(self.encoder, x))[0].reshape(-1)
+        y = np.asarray(self.graph_forward(self.decoder, z.reshape(1, self.latent_dim)))[0].reshape(self.input_shape)
         y = UVAEDataGenerator.denormalize(y)
         decoded_img = np.clip(y, 0.0, 255.0).astype('uint8')
         return img, decoded_img, z
@@ -312,7 +333,7 @@ class UniformVectorizedAutoEncoder:
         space = np.linspace(-1.0, 1.0, frame)
         for val in space:
             z = np.zeros(shape=(1, self.latent_dim), dtype=np.float32) + val
-            y = np.asarray(self.graph_forward(self.decoder, z))
+            y = np.asarray(self.graph_forward(self.decoder, z))[0]
             y = UVAEDataGenerator.denormalize(y)
             generated_image = np.clip(np.asarray(y).reshape(self.input_shape), 0.0, 255.0).astype('uint8')
             cv2.imshow('interpolation', generated_image)
