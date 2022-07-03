@@ -32,6 +32,7 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
                  input_shape,
                  batch_size,
                  latent_dim,
+                 z_activation,
                  return_encoder_x_only=False):
         self.encoder = encoder
         self.decoder = decoder
@@ -39,6 +40,7 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         self.input_shape = input_shape
         self.batch_size = batch_size
         self.latent_dim = latent_dim
+        self.z_activation = z_activation
         self.half_batch_size = batch_size // 2
         self.pool = ThreadPoolExecutor(8)
         self.return_encoder_x_only = return_encoder_x_only
@@ -54,13 +56,13 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
             img = cv2.resize(img, (self.input_shape[1], self.input_shape[0]))
             x = np.asarray(img).reshape(self.input_shape)
             ex.append(x)
-        ex = self.normalize(np.asarray(ex).reshape((self.batch_size,) + self.input_shape).astype('float32'))
+        ex = self.normalize(np.asarray(ex).reshape((self.batch_size,) + self.input_shape).astype('float32'), self.z_activation)
         if self.return_encoder_x_only:
             return [ex]
         half_ex = ex[:self.half_batch_size]
         half_z_real =  np.asarray(self.graph_forward(self.encoder, half_ex)).astype('float32')
-        half_z_fake =  np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
-        half_z_fake2 = np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
+        half_z_fake =  np.asarray([self.get_z_vector(size=self.latent_dim, z_activation=self.z_activation) for _ in range(self.half_batch_size)]).astype('float32')
+        half_z_fake2 = np.asarray([self.get_z_vector(size=self.latent_dim, z_activation=self.z_activation) for _ in range(self.half_batch_size)]).astype('float32')
 
         z_dx_real = half_z_fake.reshape((self.half_batch_size, self.latent_dim))
         z_dx_fake = half_z_real.reshape((self.half_batch_size, self.latent_dim))
@@ -92,26 +94,43 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         return model(x, training=False)
 
     @staticmethod
-    def normalize(x):
-        x = x / 255.0 * 2.0 - 1.0
-        return x
+    def normalize(x, z_activation):
+        if z_activation == 'sigmoid':
+            return x / 255.0
+        elif z_activation == 'tanh':
+            return x / 255.0 * 2.0 - 1.0
+        else:
+            return None
 
     @staticmethod
-    def denormalize(x):
-        x = ((x + 1.0) / 2.0) * 255.0
-        return x
+    def denormalize(x, z_activation):
+        if z_activation == 'sigmoid':
+            return x * 255.0
+        elif z_activation == 'tanh':
+            return ((x + 1.0) / 2.0) * 255.0
+        else:
+            return None
 
     @staticmethod
-    def get_z_vector(size, mode='uniform'):
+    def get_z_vector(size, z_activation, mode='uniform'):
         if mode == 'uniform':
-            z = np.random.uniform(-1.0, 1.0, size=size)
+            if z_activation == 'sigmoid':
+                z = np.random.uniform(0.0, 1.0, size=size)
+            elif z_activation == 'tanh':
+                z = np.random.uniform(-1.0, 1.0, size=size)
         elif mode == 'normal':
-            z = np.random.normal(loc=0.0, scale=1.0, size=size)
+            if z_activation == 'sigmoid':
+                z = np.random.normal(loc=0.5, scale=0.5, size=size)
+            elif z_activation == 'tanh':
+                z = np.random.normal(loc=0.0, scale=1.0, size=size)
         elif mode == 'normal_norm':
             z = np.random.normal(loc=0.0, scale=0.1, size=size)
             z -= np.min(z)
             z /= np.max(z)
-            z = z * 2.0 - 1.0
+            if z_activation == 'sigmoid':
+                pass
+            elif z_activation == 'tanh':
+                z = z * 2.0 - 1.0
         # z = np.clip(z, -1.0, 1.0)
         return z
 

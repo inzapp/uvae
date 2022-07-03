@@ -41,7 +41,8 @@ class UniformVectorizedAutoEncoder:
                  latent_dim=128,
                  iterations=100000,
                  validation_split=0.2,
-                 vanilla_vae=True,
+                 vanilla_vae=False,
+                 z_activation='tanh',
                  validation_image_path='',
                  checkpoint_path='checkpoints',
                  pretrained_model_path='',
@@ -57,14 +58,16 @@ class UniformVectorizedAutoEncoder:
         self.checkpoint_path = checkpoint_path
         self.view_grid_size = view_grid_size
         self.vanilla_vae = vanilla_vae
+        self.z_activation = z_activation
         self.z_losses = []
         plt.style.use(['dark_background'])
         plt.tight_layout(0.5)
         self.fig, _ = plt.subplots()
+        assert self.z_activation in ['sigmoid', 'tanh']
         if self.latent_dim == -1:
             self.latent_dim = self.input_shape[0] // 32 * self.input_shape[1] // 32 * 256
 
-        self.model = Model(input_shape=input_shape, latent_dim=self.latent_dim, vanilla_vae=self.vanilla_vae)
+        self.model = Model(input_shape=input_shape, latent_dim=self.latent_dim, z_activation=self.z_activation, vanilla_vae=self.vanilla_vae)
         self.encoder, self.decoder, self.z_discriminator, self.d_discriminator, self.vae, self.z_gan, self.d_gan = self.model.build()
         # if os.path.exists(pretrained_model_path) and os.path.isfile(pretrained_model_path):
         #     print(f'\npretrained model path : {[pretrained_model_path]}')
@@ -83,6 +86,7 @@ class UniformVectorizedAutoEncoder:
             input_shape=input_shape,
             batch_size=batch_size,
             latent_dim=self.latent_dim,
+            z_activation=self.z_activation,
             return_encoder_x_only=self.vanilla_vae)
         self.validation_data_generator = UVAEDataGenerator(
             encoder=self.encoder,
@@ -91,6 +95,7 @@ class UniformVectorizedAutoEncoder:
             input_shape=input_shape,
             batch_size=batch_size,
             latent_dim=self.latent_dim,
+            z_activation=self.z_activation,
             return_encoder_x_only=self.vanilla_vae)
         self.validation_data_generator_one_batch = UVAEDataGenerator(
             encoder=self.encoder,
@@ -99,6 +104,7 @@ class UniformVectorizedAutoEncoder:
             input_shape=input_shape,
             batch_size=1,
             latent_dim=self.latent_dim,
+            z_activation=self.z_activation,
             return_encoder_x_only=self.vanilla_vae)
 
     def fit(self):
@@ -152,7 +158,7 @@ class UniformVectorizedAutoEncoder:
     def calculate_mean_var_std(self, latent_dim, iteration=10000):
         mean_sum, var_sum, std_sum = 0.0, 0.0, 0.0
         for _ in tqdm(range(iteration)):
-            z = UVAEDataGenerator.get_z_vector(size=latent_dim)
+            z = UVAEDataGenerator.get_z_vector(size=latent_dim, z_activation=self.z_activation)
             mean_sum += np.mean(z)
             var_sum += np.var(z)
             std_sum += np.std(z)
@@ -210,7 +216,7 @@ class UniformVectorizedAutoEncoder:
                     reconstruction_loss = 0.0
                     distance_loss = 0.0
                     kl_loss = 0.0
-                    distribution_loss = self.train_step_distribution(self.encoder, optimizer_e, ex, mean, var, std)
+                    # distribution_loss = self.train_step_distribution(self.encoder, optimizer_e, ex, mean, var, std)
                     reconstruction_loss = train_step_ae(self.vae, optimizer_vae, ex, ex)
 
                     z_discriminator_loss = 0.0
@@ -269,34 +275,39 @@ class UniformVectorizedAutoEncoder:
                 break
 
     def generate_random_image(self, size=1):
-        z = np.asarray([UVAEDataGenerator.get_z_vector(size=self.latent_dim) for _ in range(size)]).astype('float32')
+        z = np.asarray([UVAEDataGenerator.get_z_vector(size=self.latent_dim, z_activation=self.z_activation) for _ in range(size)]).astype('float32')
         # z = np.zeros(shape=((size, self.latent_dim)), dtype=np.float32)
         y = np.asarray(self.graph_forward(self.decoder, z))[0]
-        y = UVAEDataGenerator.denormalize(y)
+        y = UVAEDataGenerator.denormalize(y, z_activation=self.z_activation)
         generated_images = np.clip(np.asarray(y).reshape((size,) + self.input_shape), 0.0, 255.0).astype('uint8')
         return generated_images[0] if size == 1 else generated_images
 
     def generate_latent_space_2d(self, split_size=10):
         assert split_size > 1
         assert self.latent_dim == 2
-        space = np.linspace(-1.0, 1.0, split_size)
+        if self.z_activation == 'sigmoid':
+            space = np.linspace(0.0, 1.0, split_size)
+        elif self.z_activation == 'tanh':
+            space = np.linspace(-1.0, 1.0, split_size)
+        else:
+            space = None
         z = []
         for i in range(split_size):
             for j in range(split_size):
                 z.append([space[i], space[j]])
         z = np.asarray(z).reshape((split_size * split_size, 2)).astype('float32')
         y = np.asarray(self.graph_forward(self.decoder, z))
-        y = UVAEDataGenerator.denormalize(y)
+        y = UVAEDataGenerator.denormalize(y, z_activation=self.z_activation)
         generated_images = np.clip(np.asarray(y).reshape((split_size * split_size,) + self.input_shape), 0.0, 255.0).astype('uint8')
         return generated_images
 
     def predict(self, img):
         img = self.resize(img, (self.input_shape[1], self.input_shape[0]))
         x = np.asarray(img).reshape((1,) + self.input_shape).astype('float32')
-        x = UVAEDataGenerator.normalize(x)
+        x = UVAEDataGenerator.normalize(x, z_activation=self.z_activation)
         z = np.asarray(self.graph_forward(self.encoder, x))[0].reshape(-1)
         y = np.asarray(self.graph_forward(self.decoder, z.reshape(1, self.latent_dim)))[0].reshape(self.input_shape)
-        y = UVAEDataGenerator.denormalize(y)
+        y = UVAEDataGenerator.denormalize(y, z_activation=self.z_activation)
         decoded_img = np.clip(y, 0.0, 255.0).astype('uint8')
         return img, decoded_img, z
 
@@ -329,7 +340,7 @@ class UniformVectorizedAutoEncoder:
         for val in space:
             z = np.zeros(shape=(1, self.latent_dim), dtype=np.float32) + val
             y = np.asarray(self.graph_forward(self.decoder, z))[0]
-            y = UVAEDataGenerator.denormalize(y)
+            y = UVAEDataGenerator.denormalize(y, z_activation=self.z_activation)
             generated_image = np.clip(np.asarray(y).reshape(self.input_shape), 0.0, 255.0).astype('uint8')
             cv2.imshow('interpolation', generated_image)
             key = cv2.waitKey(10)
