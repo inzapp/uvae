@@ -41,6 +41,7 @@ class UniformVectorizedAutoEncoder:
                  latent_dim=128,
                  iterations=100000,
                  validation_split=0.2,
+                 vanilla_vae=True,
                  validation_image_path='',
                  checkpoint_path='checkpoints',
                  pretrained_model_path='',
@@ -55,6 +56,7 @@ class UniformVectorizedAutoEncoder:
         self.latent_dim = latent_dim
         self.checkpoint_path = checkpoint_path
         self.view_grid_size = view_grid_size
+        self.vanilla_vae = vanilla_vae
         self.z_losses = []
         plt.style.use(['dark_background'])
         plt.tight_layout(0.5)
@@ -62,7 +64,7 @@ class UniformVectorizedAutoEncoder:
         if self.latent_dim == -1:
             self.latent_dim = self.input_shape[0] // 32 * self.input_shape[1] // 32 * 256
 
-        self.model = Model(input_shape=input_shape, latent_dim=self.latent_dim)
+        self.model = Model(input_shape=input_shape, latent_dim=self.latent_dim, vanilla_vae=self.vanilla_vae)
         self.encoder, self.decoder, self.z_discriminator, self.d_discriminator, self.vae, self.z_gan, self.d_gan = self.model.build()
         # if os.path.exists(pretrained_model_path) and os.path.isfile(pretrained_model_path):
         #     print(f'\npretrained model path : {[pretrained_model_path]}')
@@ -80,21 +82,24 @@ class UniformVectorizedAutoEncoder:
             image_paths=self.train_image_paths,
             input_shape=input_shape,
             batch_size=batch_size,
-            latent_dim=self.latent_dim)
+            latent_dim=self.latent_dim,
+            return_encoder_x_only=self.vanilla_vae)
         self.validation_data_generator = UVAEDataGenerator(
             encoder=self.encoder,
             decoder=self.decoder,
             image_paths=self.validation_image_paths,
             input_shape=input_shape,
             batch_size=batch_size,
-            latent_dim=self.latent_dim)
+            latent_dim=self.latent_dim,
+            return_encoder_x_only=self.vanilla_vae)
         self.validation_data_generator_one_batch = UVAEDataGenerator(
             encoder=self.encoder,
             decoder=self.decoder,
             image_paths=self.validation_image_paths,
             input_shape=input_shape,
             batch_size=1,
-            latent_dim=self.latent_dim)
+            latent_dim=self.latent_dim,
+            return_encoder_x_only=self.vanilla_vae)
 
     def fit(self):
         self.model.summary()
@@ -115,16 +120,6 @@ class UniformVectorizedAutoEncoder:
             loss_var = K.square(var - tf.math.reduce_variance(z))
             loss_std = K.square(std - tf.math.reduce_std(z))
             loss = (loss_mean + loss_var + loss_std) / 3.0
-        gradients = tape.gradient(loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-        return loss
-
-    @tf.function
-    def train_step_distance(self, model, optimizer, x):
-        with tf.GradientTape() as tape:
-            half_batch_size = K.cast(K.shape(x)[0] / 2, dtype=tf.int32)
-            z = model(x, training=True)
-            loss = -tf.reduce_mean(K.square(z[half_batch_size:] - z[:half_batch_size]))
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss
@@ -203,40 +198,40 @@ class UniformVectorizedAutoEncoder:
         train_z_d = True
         while True:
             # for ex, z_dx, z_dy, d_dx, d_dy, z_gan_y, d_gan_x, d_gan_y in self.train_data_generator:
-            for ex, z_dx, z_dy, fake_label in self.train_data_generator:
+            for data in self.train_data_generator:
                 iteration_count += 1
-
-                distribution_loss = 0.0
-                reconstruction_loss = 0.0
-                distance_loss = 0.0
-                kl_loss = 0.0
-                # distribution_loss = self.train_step_distribution(self.encoder, optimizer_e, ex, mean, var, std)
-                # distance_loss = self.train_step_distance(self.encoder, optimizer_e, ex)
-                # reconstruction_loss = train_step_ae(self.vae, optimizer_vae, ex, ex)
-                reconstruction_loss, kl_loss = self.train_step_vae(self.vae, optimizer_vae, ex, ex)
-
-                # z_discriminator_loss = 0.0
-                # z_adversarial_loss = 0.0
-                # z_loss_diff = 0.0
-                # if train_z_d:
-                #     self.z_discriminator.trainable = True
-                #     z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
-                # self.z_discriminator.trainable = False
-                # z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, fake_label)
-                # z_loss_diff = self.get_z_loss_diff(z_discriminator_loss, z_adversarial_loss)
-                # if z_loss_diff < 0.05:
-                #     train_z_d = False
-
-                d_adversarial_loss = 0.0
-                d_discriminator_loss = 0.0
-                # self.d_discriminator.trainable = True
-                # d_discriminator_loss = train_step_d_d(self.d_discriminator, optimizer_d_d, d_dx, d_dy)
-                # self.d_discriminator.trainable = False
-                # d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, d_gan_y)
-
-                if kl_loss > 0.0:
+                if self.vanilla_vae:
+                    ex = data[0]
+                    reconstruction_loss, kl_loss = self.train_step_vae(self.vae, optimizer_vae, ex, ex)
                     print(f'[iteration count : {iteration_count:6d}] reconstruction_loss : {reconstruction_loss:.4f}, kl_loss : {kl_loss:.4f}')
                 else:
+                    ex, z_dx, z_dy, fake_label = data
+                    distribution_loss = 0.0
+                    reconstruction_loss = 0.0
+                    distance_loss = 0.0
+                    kl_loss = 0.0
+                    distribution_loss = self.train_step_distribution(self.encoder, optimizer_e, ex, mean, var, std)
+                    reconstruction_loss = train_step_ae(self.vae, optimizer_vae, ex, ex)
+
+                    z_discriminator_loss = 0.0
+                    z_adversarial_loss = 0.0
+                    z_loss_diff = 0.0
+                    if train_z_d:
+                        self.z_discriminator.trainable = True
+                        z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
+                    self.z_discriminator.trainable = False
+                    z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, fake_label)
+                    z_loss_diff = self.get_z_loss_diff(z_discriminator_loss, z_adversarial_loss)
+                    if z_loss_diff < 0.05:
+                        train_z_d = False
+
+                    d_adversarial_loss = 0.0
+                    d_discriminator_loss = 0.0
+                    # self.d_discriminator.trainable = True
+                    # d_discriminator_loss = train_step_d_d(self.d_discriminator, optimizer_d_d, d_dx, d_dy)
+                    # self.d_discriminator.trainable = False
+                    # d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, d_gan_y)
+
                     print(f'[iteration count : {iteration_count:6d}] reconstruction_loss : {reconstruction_loss:.4f}, distribution_loss : {distribution_loss:.4f}, distance_loss : {distance_loss:.4f}, z_discriminator_loss : {z_discriminator_loss:.4f}, z_adversarial_loss : {z_adversarial_loss:.4f}, z_loss_diff : {z_loss_diff:.4f}')
                 if self.training_view:
                     self.training_view_function()

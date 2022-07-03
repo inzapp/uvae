@@ -27,7 +27,7 @@ os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 
 class Model:
-    def __init__(self, input_shape, latent_dim, mode='mlp_cnn', vanilla_vae=True):
+    def __init__(self, input_shape, latent_dim, mode='mlp_cnn', vanilla_vae=False):
         self.input_shape = input_shape
         self.latent_dim = latent_dim
         self.mode = mode

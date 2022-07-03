@@ -31,7 +31,8 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
                  image_paths,
                  input_shape,
                  batch_size,
-                 latent_dim):
+                 latent_dim,
+                 return_encoder_x_only=False):
         self.encoder = encoder
         self.decoder = decoder
         self.image_paths = image_paths
@@ -40,6 +41,7 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         self.latent_dim = latent_dim
         self.half_batch_size = batch_size // 2
         self.pool = ThreadPoolExecutor(8)
+        self.return_encoder_x_only = return_encoder_x_only
         self.img_index = 0
 
     def __getitem__(self, index):
@@ -53,8 +55,10 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
             x = np.asarray(img).reshape(self.input_shape)
             ex.append(x)
         ex = self.normalize(np.asarray(ex).reshape((self.batch_size,) + self.input_shape).astype('float32'))
+        if self.return_encoder_x_only:
+            return [ex]
         half_ex = ex[:self.half_batch_size]
-        half_z_real =  np.asarray(self.graph_forward(self.encoder, half_ex))[0].astype('float32')
+        half_z_real =  np.asarray(self.graph_forward(self.encoder, half_ex)).astype('float32')
         half_z_fake =  np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
         half_z_fake2 = np.asarray([self.get_z_vector(size=self.latent_dim) for _ in range(self.half_batch_size)]).astype('float32')
 
