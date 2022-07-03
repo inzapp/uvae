@@ -27,7 +27,7 @@ os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 
 class Model:
-    def __init__(self, input_shape, latent_dim, mode='fcn', vanilla_vae=True):
+    def __init__(self, input_shape, latent_dim, mode='mlp_cnn', vanilla_vae=True):
         self.input_shape = input_shape
         self.latent_dim = latent_dim
         self.mode = mode
@@ -129,7 +129,7 @@ class Model:
             mu = self.dense(x, self.latent_dim, activation='linear')
             log_var = self.dense(x, self.latent_dim, activation='linear')
             z = self.sampling(mu, log_var)
-            return mu, log_var, z
+            return encoder_input, [z, mu, log_var]
         encoder_output = self.dense(x, self.latent_dim, activation='tanh')
         return encoder_input, encoder_output
 
