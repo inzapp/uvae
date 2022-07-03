@@ -27,9 +27,10 @@ os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 
 class Model:
-    def __init__(self, input_shape, latent_dim):
+    def __init__(self, input_shape, latent_dim, mode='fcn'):
         self.input_shape = input_shape
         self.latent_dim = latent_dim
+        self.mode = mode
         self.encoder = None
         self.decoder = None
         self.vae = None
@@ -41,8 +42,12 @@ class Model:
     def build(self):
         assert self.input_shape[0] % 32 == 0
         assert self.input_shape[1] % 32 == 0
-        encoder_input, encoder_output = self.build_encoder()
-        decoder_input, decoder_output = self.build_decoder()
+        if self.mode == 'fcn':
+            encoder_input, encoder_output = self.build_encoder_fcn()
+            decoder_input, decoder_output = self.build_decoder_fcn()
+        elif self.mode == 'mlp_cnn':
+            encoder_input, encoder_output = self.build_encoder_mlp_cnn()
+            decoder_input, decoder_output = self.build_decoder_mlp_cnn()
         self.encoder = tf.keras.models.Model(encoder_input, encoder_output)
         self.decoder = tf.keras.models.Model(decoder_input, decoder_output)
         z_discriminator_input, z_discriminator_output = self.build_z_discriminator()
@@ -68,7 +73,7 @@ class Model:
     #     self.input_shape = self.vae.input_shape[1:]
     #     return self.vae, self.input_shape
 
-    def build_encoder(self):
+    def build_encoder_fcn(self):
         encoder_input = tf.keras.layers.Input(shape=self.input_shape)
         x = encoder_input
         x = self.conv2d(x, 16,  3, 2, activation='relu')
@@ -77,22 +82,48 @@ class Model:
         x = self.conv2d(x, 128, 3, 2, activation='relu')
         x = self.conv2d(x, 256, 3, 2, activation='relu')
         x = self.flatten(x)
+        x = self.dense(x, 4096, activation='relu')
         encoder_output = self.dense(x, self.latent_dim, activation='tanh')
         return encoder_input, encoder_output
 
-    def build_decoder(self):
+    def build_decoder_fcn(self):
         target_rows = self.input_shape[0] // 32
         target_cols = self.input_shape[1] // 32
         target_channels = 256
 
         decoder_input = tf.keras.layers.Input(shape=(self.latent_dim,))
         x = decoder_input
-        # x = self.noise_layer(x)
+        x = self.dense(x, 4096, activation='relu')
         x = self.dense(x, target_rows * target_cols * target_channels, activation='relu')
         x = self.reshape(x, (target_rows, target_cols, target_channels))
         x = self.conv2d_transpose(x, 256, 3, 2, activation='relu')
         x = self.conv2d_transpose(x, 128, 3, 2, activation='relu')
         x = self.conv2d_transpose(x, 64,  3, 2, activation='relu')
+        x = self.conv2d_transpose(x, 32,  3, 2, activation='relu')
+        x = self.conv2d_transpose(x, 16,  3, 2, activation='relu')
+        decoder_output = self.conv2d_transpose(x, self.input_shape[-1], 1, 1, activation='tanh')
+        return decoder_input, decoder_output
+
+    def build_encoder_mlp_cnn(self):
+        encoder_input = tf.keras.layers.Input(shape=self.input_shape)
+        x = encoder_input
+        x = self.conv2d(x, 16,  3, 2, activation='relu')
+        x = self.conv2d(x, 32,  3, 2, activation='relu')
+        x = self.flatten(x)
+        x = self.dense(x, 4096, activation='relu')
+        encoder_output = self.dense(x, self.latent_dim, activation='tanh')
+        return encoder_input, encoder_output
+
+    def build_decoder_mlp_cnn(self):
+        target_rows = self.input_shape[0] // 4
+        target_cols = self.input_shape[1] // 4
+        target_channels = 32
+
+        decoder_input = tf.keras.layers.Input(shape=(self.latent_dim,))
+        x = decoder_input
+        x = self.dense(x, 4096, activation='relu')
+        x = self.dense(x, target_rows * target_cols * target_channels, activation='relu')
+        x = self.reshape(x, (target_rows, target_cols, target_channels))
         x = self.conv2d_transpose(x, 32,  3, 2, activation='relu')
         x = self.conv2d_transpose(x, 16,  3, 2, activation='relu')
         decoder_output = self.conv2d_transpose(x, self.input_shape[-1], 1, 1, activation='tanh')
@@ -124,16 +155,6 @@ class Model:
             epsilon = K.random_normal(shape=K.shape(mu), mean=0.0, stddev=1.0)
             return mu + K.exp(log_var * 0.5) * epsilon
         return tf.keras.layers.Lambda(function=function)([mu, log_var])
-
-    def noise_layer(self, x):
-        def function(f):
-            # f *= tf.random.normal(shape=K.shape(f), mean=0.0, stddev=1.0)
-            # f *= tf.random.normal(shape=K.shape(f), mean=0.5, stddev=0.5)
-            f *= tf.random.uniform(shape=K.shape(f), minval=0.0, maxval=1.0)
-            f += tf.random.uniform(shape=K.shape(f), minval=-0.1, maxval=0.1)
-            f = K.clip(f, -1.0, 1.0)
-            return f
-        return tf.keras.layers.Lambda(function=function)(x)
 
     def conv2d(self, x, filters, kernel_size, strides=1, bn=False, activation='relu', alpha=0.2):
         x = tf.keras.layers.Conv2D(
