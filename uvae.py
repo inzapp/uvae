@@ -55,6 +55,7 @@ class UniformVectorizedAutoEncoder:
         self.latent_dim = latent_dim
         self.checkpoint_path = checkpoint_path
         self.view_grid_size = view_grid_size
+        self.z_losses = []
         plt.style.use(['dark_background'])
         plt.tight_layout(0.5)
         self.fig, _ = plt.subplots()
@@ -140,13 +141,6 @@ class UniformVectorizedAutoEncoder:
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
         return loss
 
-    # def evaluate(self, generator):
-    #     loss_sum = 0.0
-    #     for ex, ae_y, ae_mask in tqdm(generator):
-    #         y = self.graph_forward(self.vae, ex)
-    #         loss_sum += np.mean(np.abs(ae_y[0] - y[0]))
-    #     return float(loss_sum / len(generator))
-
     def calculate_mean_var_std(self, latent_dim, iteration=10000):
         mean_sum, var_sum, std_sum = 0.0, 0.0, 0.0
         for _ in tqdm(range(iteration)):
@@ -163,14 +157,20 @@ class UniformVectorizedAutoEncoder:
         std = tf.constant(std, dtype=tf.dtypes.float32)
         return mean, var, std
 
+    def get_z_loss_diff(self, z_d_loss, z_a_loss):
+        self.z_losses.append(abs(z_d_loss - z_a_loss))
+        if len(self.z_losses) > 100:
+            self.z_losses.pop(0)
+        return np.mean(self.z_losses)
+
     def train(self):
         iteration_count = 0
         optimizer_e =     tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
         optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.2, beta_1=0.5)
-        optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.2, beta_1=0.5)
+        optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
         optimizer_vae =   tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
         optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.2, beta_1=0.5)
-        optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.2, beta_1=0.5)
+        optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr, beta_1=0.5)
 
         # optimizer_e =     tf.keras.optimizers.RMSprop(lr=self.lr)
         # optimizer_z_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
@@ -187,6 +187,7 @@ class UniformVectorizedAutoEncoder:
         train_step_d_gan = tf.function(self.train_step_mse)
         mean, var, std = self.calculate_mean_var_std(latent_dim=self.latent_dim)
         os.makedirs(self.checkpoint_path, exist_ok=True)
+        train_z_d = True
         while True:
             # for ex, z_dx, z_dy, d_dx, d_dy, z_gan_y, d_gan_x, d_gan_y in self.train_data_generator:
             for ex, z_dx, z_dy, fake_label in self.train_data_generator:
@@ -199,10 +200,14 @@ class UniformVectorizedAutoEncoder:
 
                 z_discriminator_loss = 0.0
                 z_adversarial_loss = 0.0
-                self.z_discriminator.trainable = True
-                z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
+                if train_z_d:
+                    self.z_discriminator.trainable = True
+                    z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
                 self.z_discriminator.trainable = False
                 z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, fake_label)
+                z_loss_diff = self.get_z_loss_diff(z_discriminator_loss, z_adversarial_loss)
+                if z_loss_diff < 0.05:
+                    train_z_d = False
 
                 d_adversarial_loss = 0.0
                 d_discriminator_loss = 0.0
@@ -211,7 +216,7 @@ class UniformVectorizedAutoEncoder:
                 # self.d_discriminator.trainable = False
                 # d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, d_gan_y)
 
-                print(f'[iteration count : {iteration_count:6d}] reconstruction_loss : {reconstruction_loss:.4f}, distribution_loss : {distribution_loss:.4f}, z_discriminator_loss : {z_discriminator_loss:.4f}, z_adversarial_loss : {z_adversarial_loss:.4f}')
+                print(f'[iteration count : {iteration_count:6d}] reconstruction_loss : {reconstruction_loss:.4f}, distribution_loss : {distribution_loss:.4f}, z_discriminator_loss : {z_discriminator_loss:.4f}, z_adversarial_loss : {z_adversarial_loss:.4f}, z_loss_diff : {z_loss_diff:.4f}')
                 if self.training_view:
                     self.training_view_function()
                 if iteration_count % 5000 == 0:
@@ -349,6 +354,8 @@ class UniformVectorizedAutoEncoder:
         for img_path in img_paths:
             img = cv2.imdecode(np.fromfile(img_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE if input_shape[-1] == 1 else cv2.IMREAD_COLOR)
             img, output_image, z = self.predict(img)
+            # with np.printoptions(precision=2, suppress=True):
+            #     print(z)
             img = self.resize(img, (input_shape[1], input_shape[0]))
             img, output_image = self.make_border(img), self.make_border(output_image)
             z_image = self.make_border(self.make_z_distribution_image(z))
