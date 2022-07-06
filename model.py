@@ -126,9 +126,9 @@ class Model:
         x = self.conv2d(x, 32, 3, 2, activation='relu')
         x = self.conv2d(x, 64, 3, 2, activation='relu')
         x = self.flatten(x)
-        x = self.dense(x, 2048, activation='relu')
-        x = self.dense(x, 2048, activation='relu')
-        x = self.dense(x, 2048, activation='relu')
+        x = self.dense(x, 2048, activation='relu', bn=True)
+        x = self.dense(x, 2048, activation='relu', bn=True)
+        x = self.dense(x, 2048, activation='relu', bn=True)
         if self.vanilla_vae:
             mu = self.dense(x, self.latent_dim, activation='linear')
             log_var = self.dense(x, self.latent_dim, activation='linear')
@@ -144,9 +144,9 @@ class Model:
 
         decoder_input = tf.keras.layers.Input(shape=(self.latent_dim,))
         x = decoder_input
-        x = self.dense(x, 2048, activation='relu')
-        x = self.dense(x, 2048, activation='relu')
-        x = self.dense(x, 2048, activation='relu')
+        x = self.dense(x, 2048, activation='relu', bn=True)
+        x = self.dense(x, 2048, activation='relu', bn=True)
+        x = self.dense(x, 2048, activation='relu', bn=True)
         x = self.dense(x, target_rows * target_cols * target_channels, activation='relu')
         x = self.reshape(x, (target_rows, target_cols, target_channels))
         x = self.conv2d_transpose(x, 64, 3, 2, activation='relu')
