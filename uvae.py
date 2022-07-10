@@ -36,7 +36,7 @@ class UniformVectorizedAutoEncoder:
     def __init__(self,
                  train_image_path=None,
                  input_shape=(64, 64, 1),
-                 lr=0.0005,
+                 lr=0.0003,
                  batch_size=32,
                  latent_dim=128,
                  iterations=100000,
@@ -190,12 +190,15 @@ class UniformVectorizedAutoEncoder:
 
     def train(self):
         iteration_count = 0
-        optimizer_e =     tf.keras.optimizers.Adam(lr=self.lr * 0.5, beta_1=0.5)
-        optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.1, beta_1=0.5)
-        optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.5, beta_1=0.5)
-        optimizer_vae =   tf.keras.optimizers.Adam(lr=self.lr * 1.0, beta_1=0.5)
-        optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.1, beta_1=0.5)
-        optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.5, beta_1=0.5)
+        momentum = 0.9
+        if self.z_adversarial_attack or self.d_adversarial_attack:
+            momentum = 0.5
+        optimizer_e =     tf.keras.optimizers.Adam(lr=self.lr * 0.5, beta_1=momentum)
+        optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.1, beta_1=momentum)
+        optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.5, beta_1=momentum)
+        optimizer_vae =   tf.keras.optimizers.Adam(lr=self.lr * 1.0, beta_1=momentum)
+        optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.1, beta_1=momentum)
+        optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.5, beta_1=momentum)
 
         # optimizer_e =     tf.keras.optimizers.RMSprop(lr=self.lr)
         # optimizer_z_d =   tf.keras.optimizers.RMSprop(lr=self.lr)
@@ -287,7 +290,7 @@ class UniformVectorizedAutoEncoder:
 
     def generate_random_image(self, size=1):
         z = np.asarray([UVAEDataGenerator.get_z_vector(size=self.latent_dim, z_activation=self.z_activation) for _ in range(size)]).astype('float32')
-        y = np.asarray(self.graph_forward(self.decoder, z))[0]
+        y = np.asarray(self.graph_forward(self.decoder, z))
         y = UVAEDataGenerator.denormalize(y, z_activation=self.z_activation)
         generated_images = np.clip(np.asarray(y).reshape((size,) + self.input_shape), 0.0, 255.0).astype('uint8')
         return generated_images[0] if size == 1 else generated_images
