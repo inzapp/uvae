@@ -25,12 +25,14 @@ if __name__ == '__main__':
         train_image_path=r'/train_data/mnist/train',
         validation_image_path=r'/train_data/mnist/validation',
         lr=0.001,
+        ae_burn=1000,
         batch_size=32,
         latent_dim=32,
         view_grid_size=4,
         iterations=1000000,
         z_activation='sigmoid',
-        z_adversarial_attack=True,
-        d_adversarial_attack=True,
+        z_adversarial_attack=False,
+        d_adversarial_attack=False,
         vanilla_vae=False,
         training_view=True).fit()
+

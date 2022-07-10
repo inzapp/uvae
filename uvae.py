@@ -42,6 +42,7 @@ class UniformVectorizedAutoEncoder:
                  iterations=100000,
                  validation_split=0.2,
                  view_grid_size=4,
+                 ae_burn=1000,
                  z_activation='sigmoid',
                  validation_image_path='',
                  pretrained_model_path='',
@@ -59,6 +60,7 @@ class UniformVectorizedAutoEncoder:
         self.latent_dim = latent_dim
         self.checkpoint_path = checkpoint_path
         self.view_grid_size = view_grid_size
+        self.ae_burn = ae_burn
         self.vanilla_vae = vanilla_vae
         self.z_activation = z_activation
         self.z_adversarial_attack = z_adversarial_attack
@@ -195,9 +197,9 @@ class UniformVectorizedAutoEncoder:
             momentum = 0.5
         optimizer_e =     tf.keras.optimizers.Adam(lr=self.lr * 0.5, beta_1=momentum)
         optimizer_z_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.1, beta_1=momentum)
-        optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.5, beta_1=momentum)
+        optimizer_d_d =   tf.keras.optimizers.Adam(lr=self.lr * 0.1, beta_1=momentum)
         optimizer_vae =   tf.keras.optimizers.Adam(lr=self.lr * 1.0, beta_1=momentum)
-        optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.1, beta_1=momentum)
+        optimizer_z_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.5, beta_1=momentum)
         optimizer_d_gan = tf.keras.optimizers.Adam(lr=self.lr * 0.5, beta_1=momentum)
 
         # optimizer_e =     tf.keras.optimizers.RMSprop(lr=self.lr)
@@ -230,29 +232,31 @@ class UniformVectorizedAutoEncoder:
                     loss_str += f' distribution_loss : {distribution_loss:.4f}'
                     loss_str += f' reconstruction_loss: {reconstruction_loss:.4f}'
 
-                    if self.z_adversarial_attack:
-                        if train_z_d:
-                            self.z_discriminator.trainable = True
-                            z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
-                            loss_str += f' z_discriminator_loss : {z_discriminator_loss:.4f}'
-                        self.z_discriminator.trainable = False
-                        z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, fake_label)
-                        z_loss_diff = self.get_z_loss_diff(z_discriminator_loss, z_adversarial_loss)
-                        if 0.24 <= z_discriminator_loss <= 0.26 and z_loss_diff < 0.05:
-                            train_z_d = False
-                        loss_str += f' z_adversarial_loss : {z_adversarial_loss:.4f}'
+                    if iteration_count > self.ae_burn:
+                        if self.z_adversarial_attack:
+                            if train_z_d:
+                                self.z_discriminator.trainable = True
+                                z_discriminator_loss = train_step_z_d(self.z_discriminator, optimizer_z_d, z_dx, z_dy)
+                                loss_str += f' z_discriminator_loss : {z_discriminator_loss:.4f}'
+                            self.z_discriminator.trainable = False
+                            z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, fake_label)
+                            z_loss_diff = self.get_z_loss_diff(z_discriminator_loss, z_adversarial_loss)
+                            if 0.24 <= z_discriminator_loss <= 0.26 and z_loss_diff < 0.05:
+                                train_z_d = False
+                            loss_str += f' z_adversarial_loss : {z_adversarial_loss:.4f}'
 
-                    if self.d_adversarial_attack:
-                        if train_d_d:
-                            self.d_discriminator.trainable = True
-                            d_discriminator_loss = train_step_d_d(self.d_discriminator, optimizer_d_d, d_dx, d_dy)
-                            loss_str += f' d_discriminator_loss : {d_discriminator_loss:.4f}'
-                        self.d_discriminator.trainable = False
-                        d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, fake_label)
-                        d_loss_diff = self.get_d_loss_diff(d_discriminator_loss, d_adversarial_loss)
-                        if 1e-4 <= d_discriminator_loss <= 1e-3 and d_loss_diff < 0.05:
-                            train_d_d = False
-                        loss_str += f' d_adversarial_loss: {d_adversarial_loss:.4f}'
+                        if self.d_adversarial_attack:
+                            if train_d_d:
+                                self.d_discriminator.trainable = True
+                                d_discriminator_loss = train_step_d_d(self.d_discriminator, optimizer_d_d, d_dx, d_dy)
+                                loss_str += f' d_discriminator_loss : {d_discriminator_loss:.4f}'
+                            self.d_discriminator.trainable = False
+                            d_adversarial_loss = train_step_d_gan(self.d_gan, optimizer_d_gan, d_gan_x, fake_label)
+                            d_loss_diff = self.get_d_loss_diff(d_discriminator_loss, d_adversarial_loss)
+                            if 1e-4 <= d_discriminator_loss <= 1e-3 and d_loss_diff < 0.05:
+                                # train_d_d = False
+                                pass
+                            loss_str += f' d_adversarial_loss: {d_adversarial_loss:.4f}'
                 print(loss_str)
                 if self.training_view:
                     self.training_view_function()
