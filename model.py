@@ -27,7 +27,7 @@ os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 
 class Model:
-    def __init__(self, input_shape, latent_dim, z_activation='tanh', mode='mlp_cnn', vanilla_vae=False):
+    def __init__(self, input_shape, latent_dim, z_activation='tanh', mode='fcn', vanilla_vae=False):
         self.input_shape = input_shape
         self.latent_dim = latent_dim
         self.z_activation = z_activation
@@ -86,13 +86,14 @@ class Model:
     def build_encoder_fcn(self):
         encoder_input = tf.keras.layers.Input(shape=self.input_shape)
         x = encoder_input
-        x = self.conv2d(x, 16,  3, 2, activation='relu')
-        x = self.conv2d(x, 32,  3, 2, activation='relu')
-        x = self.conv2d(x, 64,  3, 2, activation='relu')
-        x = self.conv2d(x, 128, 3, 2, activation='relu')
-        x = self.conv2d(x, 256, 3, 2, activation='relu')
+        x = self.conv2d(x, 16,  3, 2, activation='relu', bn=True)
+        x = self.conv2d(x, 32,  3, 2, activation='relu', bn=True)
+        x = self.conv2d(x, 64,  3, 2, activation='relu', bn=True)
+        x = self.conv2d(x, 128, 3, 2, activation='relu', bn=True)
+        x = self.conv2d(x, 256, 3, 2, activation='relu', bn=True)
         x = self.flatten(x)
-        x = self.dense(x, 4096, activation='relu')
+        x = self.dense(x, 4096, activation='relu', bn=True)
+        x = self.dense(x, 4096, activation='relu', bn=True)
         if self.vanilla_vae:
             mu = self.dense(x, self.latent_dim, activation='linear')
             log_var = self.dense(x, self.latent_dim, activation='linear')
@@ -108,14 +109,15 @@ class Model:
 
         decoder_input = tf.keras.layers.Input(shape=(self.latent_dim,))
         x = decoder_input
-        x = self.dense(x, 4096, activation='relu')
-        x = self.dense(x, target_rows * target_cols * target_channels, activation='relu')
+        x = self.dense(x, 4096, activation='relu', bn=True)
+        x = self.dense(x, 4096, activation='relu', bn=True)
+        x = self.dense(x, target_rows * target_cols * target_channels, activation='relu', bn=True)
         x = self.reshape(x, (target_rows, target_cols, target_channels))
-        x = self.conv2d_transpose(x, 256, 3, 2, activation='relu')
-        x = self.conv2d_transpose(x, 128, 3, 2, activation='relu')
-        x = self.conv2d_transpose(x, 64,  3, 2, activation='relu')
-        x = self.conv2d_transpose(x, 32,  3, 2, activation='relu')
-        x = self.conv2d_transpose(x, 16,  3, 2, activation='relu')
+        x = self.conv2d_transpose(x, 256, 3, 2, activation='relu', bn=True)
+        x = self.conv2d_transpose(x, 128, 3, 2, activation='relu', bn=True)
+        x = self.conv2d_transpose(x, 64,  3, 2, activation='relu', bn=True)
+        x = self.conv2d_transpose(x, 32,  3, 2, activation='relu', bn=True)
+        x = self.conv2d_transpose(x, 16,  3, 2, activation='relu', bn=True)
         decoder_output = self.conv2d_transpose(x, self.input_shape[-1], 1, 1, activation='tanh')
         return decoder_input, decoder_output
 
@@ -126,9 +128,9 @@ class Model:
         x = self.conv2d(x, 32, 3, 2, activation='relu')
         x = self.conv2d(x, 64, 3, 2, activation='relu')
         x = self.flatten(x)
-        x = self.dense(x, 2048, activation='relu', bn=True)
-        x = self.dense(x, 2048, activation='relu', bn=True)
-        x = self.dense(x, 2048, activation='relu', bn=True)
+        x = self.dense(x, 2048, activation='relu', bn=False)
+        x = self.dense(x, 2048, activation='relu', bn=False)
+        x = self.dense(x, 2048, activation='relu', bn=False)
         if self.vanilla_vae:
             mu = self.dense(x, self.latent_dim, activation='linear')
             log_var = self.dense(x, self.latent_dim, activation='linear')
@@ -144,9 +146,9 @@ class Model:
 
         decoder_input = tf.keras.layers.Input(shape=(self.latent_dim,))
         x = decoder_input
-        x = self.dense(x, 2048, activation='relu', bn=True)
-        x = self.dense(x, 2048, activation='relu', bn=True)
-        x = self.dense(x, 2048, activation='relu', bn=True)
+        x = self.dense(x, 2048, activation='relu', bn=False)
+        x = self.dense(x, 2048, activation='relu', bn=False)
+        x = self.dense(x, 2048, activation='relu', bn=False)
         x = self.dense(x, target_rows * target_cols * target_channels, activation='relu')
         x = self.reshape(x, (target_rows, target_cols, target_channels))
         x = self.conv2d_transpose(x, 64, 3, 2, activation='relu')
@@ -214,6 +216,9 @@ class Model:
         if bn:
             x = tf.keras.layers.BatchNormalization()(x)
         return self.activation(x, activation)
+
+    def dropout(self, x, rate):
+        return tf.keras.layers.Dropout(rate=rate)(x)
 
     def activation(self, x, activation, alpha=0.2):
         if activation == 'leaky':

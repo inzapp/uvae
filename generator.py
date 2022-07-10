@@ -70,12 +70,12 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         z_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
         fake_label = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
 
-        # d_dx_real = half_ex
-        # d_dx_fake = np.asarray(self.graph_forward(self.decoder, half_z_fake))[0].reshape((self.half_batch_size,) + self.input_shape)
-        # d_dx = np.append(d_dx_real, d_dx_fake, axis=0).astype('float32')
-        # d_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
-        # d_gan_x = np.append(half_z_fake, half_z_fake2, axis=0)
-        # d_gan_y = np.ones(shape=(self.batch_size, 1), dtype=np.float32)
+        d_dx_real = half_ex
+        d_dx_fake = np.asarray(self.graph_forward(self.decoder, half_z_fake)).reshape((self.half_batch_size,) + self.input_shape)
+        d_dx_fake2 = np.asarray(self.graph_forward(self.decoder, half_z_fake2)).reshape((self.half_batch_size,) + self.input_shape)
+        d_dx = np.append(d_dx_real, d_dx_fake, axis=0).astype('float32')
+        d_dy = np.append(np.ones(shape=(self.half_batch_size, 1)), np.zeros(shape=(self.half_batch_size, 1)), axis=0).astype('float32')
+        d_gan_x = np.append(d_dx_fake, d_dx_fake2, axis=0)
 
         # print(f'z_dx.shape : {z_dx.shape}')
         # print(f'z_dy.shape : {z_dy.shape}')
@@ -83,11 +83,7 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         # print(f'd_dy.shape : {d_dy.shape}')
         # print(f'fake_label.shape : {fake_label.shape}')
         # print(f'd_gan_x.shape : {d_gan_x.shape}')
-        # print(f'd_gan_y.shape : {d_gan_y.shape}')
-        # exit(0)
-
-        # return ex, z_dx, z_dy, d_dx, d_dy, fake_label, d_gan_x, d_gan_y
-        return ex, z_dx, z_dy, fake_label
+        return ex, z_dx, z_dy, fake_label, d_dx, d_dy, d_gan_x
 
     @tf.function
     def graph_forward(self, model, x):
@@ -131,7 +127,6 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
                 pass
             elif z_activation == 'tanh':
                 z = z * 2.0 - 1.0
-        # z = np.clip(z, -1.0, 1.0)
         return z
 
     def next_image_path(self):

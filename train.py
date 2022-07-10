@@ -27,5 +27,10 @@ if __name__ == '__main__':
         lr=0.001,
         batch_size=32,
         latent_dim=32,
-        iterations=100000,
+        view_grid_size=4,
+        iterations=1000000,
+        z_activation='sigmoid',
+        z_adversarial_attack=True,
+        d_adversarial_attack=True,
+        vanilla_vae=False,
         training_view=True).fit()
