@@ -95,8 +95,8 @@ class Model:
         x = self.dense(x, 4096, activation='relu', bn=True)
         x = self.dense(x, 4096, activation='relu', bn=True)
         if self.vanilla_vae:
-            mu = self.dense(x, self.latent_dim, activation='linear')
-            log_var = self.dense(x, self.latent_dim, activation='linear')
+            mu = self.dense(x, self.latent_dim, activation='linear', bn=True)
+            log_var = self.dense(x, self.latent_dim, activation='linear', bn=True)
             z = self.sampling(mu, log_var)
             return encoder_input, [z, mu, log_var]
         encoder_output = self.dense(x, self.latent_dim, activation=self.z_activation)
@@ -118,7 +118,7 @@ class Model:
         x = self.conv2d_transpose(x, 64,  3, 2, activation='relu', bn=True)
         x = self.conv2d_transpose(x, 32,  3, 2, activation='relu', bn=True)
         x = self.conv2d_transpose(x, 16,  3, 2, activation='relu', bn=True)
-        decoder_output = self.conv2d_transpose(x, self.input_shape[-1], 1, 1, activation='tanh')
+        decoder_output = self.conv2d_transpose(x, self.input_shape[-1], 1, 1, activation=self.z_activation)
         return decoder_input, decoder_output
 
     def build_encoder_mlp_cnn(self):
@@ -180,7 +180,9 @@ class Model:
     def sampling(self, mu, log_var):
         def function(args):
             mu, log_var = args
-            epsilon = K.random_normal(shape=K.shape(mu), mean=0.0, stddev=1.0)
+            batch = K.shape(mu)[0]
+            dim = K.shape(mu)[1]
+            epsilon = K.random_normal(shape=(batch, dim))
             return mu + K.exp(log_var * 0.5) * epsilon
         return tf.keras.layers.Lambda(function=function)([mu, log_var])
 

@@ -33,7 +33,7 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
                  batch_size,
                  latent_dim,
                  z_activation,
-                 return_encoder_x_only=False):
+                 vanilla_vae=False):
         self.encoder = encoder
         self.decoder = decoder
         self.image_paths = image_paths
@@ -43,7 +43,7 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
         self.z_activation = z_activation
         self.half_batch_size = batch_size // 2
         self.pool = ThreadPoolExecutor(8)
-        self.return_encoder_x_only = return_encoder_x_only
+        self.vanilla_vae = vanilla_vae
         self.img_index = 0
 
     def __getitem__(self, index):
@@ -57,7 +57,7 @@ class UVAEDataGenerator(tf.keras.utils.Sequence):
             x = np.asarray(img).reshape(self.input_shape)
             ex.append(x)
         ex = self.normalize(np.asarray(ex).reshape((self.batch_size,) + self.input_shape).astype('float32'), self.z_activation)
-        if self.return_encoder_x_only:
+        if self.vanilla_vae:
             return [ex]
         half_ex = ex[:self.half_batch_size]
         half_z_real =  np.asarray(self.graph_forward(self.encoder, half_ex)).astype('float32')

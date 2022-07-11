@@ -70,6 +70,10 @@ class UniformVectorizedAutoEncoder:
         plt.style.use(['dark_background'])
         plt.tight_layout(0.5)
         self.fig, _ = plt.subplots()
+        if self.vanilla_vae:
+            self.z_activation = 'sigmoid'
+            self.z_adversarial_attack = False
+            self.d_adversarial_attack = False
         assert self.z_activation in ['sigmoid', 'tanh']
         if self.latent_dim == -1:
             self.latent_dim = self.input_shape[0] // 32 * self.input_shape[1] // 32 * 256
@@ -94,7 +98,7 @@ class UniformVectorizedAutoEncoder:
             batch_size=batch_size,
             latent_dim=self.latent_dim,
             z_activation=self.z_activation,
-            return_encoder_x_only=self.vanilla_vae)
+            vanilla_vae=self.vanilla_vae)
         self.validation_data_generator = UVAEDataGenerator(
             encoder=self.encoder,
             decoder=self.decoder,
@@ -103,7 +107,7 @@ class UniformVectorizedAutoEncoder:
             batch_size=batch_size,
             latent_dim=self.latent_dim,
             z_activation=self.z_activation,
-            return_encoder_x_only=self.vanilla_vae)
+            vanilla_vae=self.vanilla_vae)
         self.validation_data_generator_one_batch = UVAEDataGenerator(
             encoder=self.encoder,
             decoder=self.decoder,
@@ -112,7 +116,7 @@ class UniformVectorizedAutoEncoder:
             batch_size=1,
             latent_dim=self.latent_dim,
             z_activation=self.z_activation,
-            return_encoder_x_only=self.vanilla_vae)
+            vanilla_vae=self.vanilla_vae)
 
     def fit(self):
         self.model.summary()
@@ -145,7 +149,7 @@ class UniformVectorizedAutoEncoder:
         return loss
 
     @tf.function
-    def train_step_vae(self, model, optimizer, x, y_true):
+    def train_step_vae(self, model, optimizer, x, y_true, use_kl_loss):
         def softclip(tensor, min_val):
             return min_val + K.softplus(tensor - min_val)
         def gaussian_nll(mu, log_sigma, x):
@@ -156,7 +160,11 @@ class UniformVectorizedAutoEncoder:
             log_sigma = K.log(K.sqrt(tf.reduce_mean(K.square(y_true - y_pred))))
             log_sigma = softclip(log_sigma, -6.0)
             reconstruction_loss = tf.reduce_sum(gaussian_nll(y_pred, log_sigma, y_true)) / batch_size
-            kl_loss = -0.5 * tf.reduce_sum((1.0 + log_var - K.square(mu) - K.exp(log_var))) / batch_size
+            if use_kl_loss:
+                kl_loss = -0.5 * (1.0 + log_var - K.square(mu) - tf.exp(log_var))
+                kl_loss = tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1))
+            else:
+                kl_loss = 0.0
             loss = reconstruction_loss + kl_loss
         gradients = tape.gradient(loss, model.trainable_variables)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -165,7 +173,10 @@ class UniformVectorizedAutoEncoder:
     def calculate_mean_var_std(self, latent_dim, iteration=10000):
         mean_sum, var_sum, std_sum = 0.0, 0.0, 0.0
         for _ in tqdm(range(iteration)):
-            z = UVAEDataGenerator.get_z_vector(size=latent_dim, z_activation=self.z_activation)
+            if self.vanilla_vae:
+                z = UVAEDataGenerator.get_z_vector(size=latent_dim, z_activation='tanh', mode='normal')
+            else:
+                z = UVAEDataGenerator.get_z_vector(size=latent_dim, z_activation=self.z_activation)
             mean_sum += np.mean(z)
             var_sum += np.var(z)
             std_sum += np.std(z)
@@ -223,7 +234,7 @@ class UniformVectorizedAutoEncoder:
                 loss_str = f'[iteration count : {iteration_count:6d}]'
                 if self.vanilla_vae:
                     ex = data[0]
-                    reconstruction_loss, kl_loss = self.train_step_vae(self.vae, optimizer_vae, ex, ex)
+                    reconstruction_loss, kl_loss = self.train_step_vae(self.vae, optimizer_vae, ex, ex, iteration_count > self.ae_burn)
                     loss_str += f' reconstruction_loss : {reconstruction_loss:.4f}, kl_loss : {kl_loss:.4f}'
                 else:
                     ex, z_dx, z_dy, fake_label, d_dx, d_dy, d_gan_x = data
@@ -242,7 +253,8 @@ class UniformVectorizedAutoEncoder:
                             z_adversarial_loss = train_step_z_gan(self.z_gan, optimizer_z_gan, ex, fake_label)
                             z_loss_diff = self.get_z_loss_diff(z_discriminator_loss, z_adversarial_loss)
                             if 0.24 <= z_discriminator_loss <= 0.26 and z_loss_diff < 0.05:
-                                train_z_d = False
+                                # train_z_d = False
+                                pass
                             loss_str += f' z_adversarial_loss : {z_adversarial_loss:.4f}'
 
                         if self.d_adversarial_attack:
@@ -293,7 +305,10 @@ class UniformVectorizedAutoEncoder:
                 break
 
     def generate_random_image(self, size=1):
-        z = np.asarray([UVAEDataGenerator.get_z_vector(size=self.latent_dim, z_activation=self.z_activation) for _ in range(size)]).astype('float32')
+        if self.vanilla_vae:
+            z = np.asarray([UVAEDataGenerator.get_z_vector(size=self.latent_dim, z_activation='tanh', mode='uniform') for _ in range(size)]).astype('float32')
+        else:
+            z = np.asarray([UVAEDataGenerator.get_z_vector(size=self.latent_dim, z_activation=self.z_activation) for _ in range(size)]).astype('float32')
         y = np.asarray(self.graph_forward(self.decoder, z))
         y = UVAEDataGenerator.denormalize(y, z_activation=self.z_activation)
         generated_images = np.clip(np.asarray(y).reshape((size,) + self.input_shape), 0.0, 255.0).astype('uint8')
@@ -302,10 +317,10 @@ class UniformVectorizedAutoEncoder:
     def generate_latent_space_2d(self, split_size=10):
         assert split_size > 1
         assert self.latent_dim == 2
-        if self.z_activation == 'sigmoid':
-            space = np.linspace(0.0, 1.0, split_size)
-        elif self.z_activation == 'tanh':
+        if self.z_activation == 'tanh' or self.vanilla_vae:
             space = np.linspace(-1.0, 1.0, split_size)
+        elif self.z_activation == 'sigmoid':
+            space = np.linspace(0.0, 1.0, split_size)
         else:
             space = None
         z = []
